@@ -1,42 +1,53 @@
-from flask import Flask, request, jsonify
+# app.py - Main application file
+import json
 import logging
-import os
+from flask import Flask, jsonify, request, make_response, render_template
 from flask_cors import CORS
-
-# Setup logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
+from werkzeug.exceptions import HTTPException
+from werkzeug.middleware.proxy_fix import ProxyFix
+from flask_babel import Babel
+import traceback
+from .Services.AgentService import AgentService
+from .Controller.AgentController import AgentController
+# Import services and controllers
+from .Services.CampaignService import CampaignService
+from .Controller.CampaignController import CampaignController
+from .database import init_mongodb
+from .Controller.BusinessController import BusinessController
+from .Services.BusinessService import BusinessService
+# Configure logging
 logger = logging.getLogger(__name__)
 
 # Initialize Flask app
-app = Flask(__name__)
+app = Flask(__name__, template_folder='templates')
+app.config['SESSION_TYPE'] = 'filesystem'
+app.config["SESSION_PERMANENT"] = False
 
-# Enable CORS
+# Apply CORS and proxy fix
 CORS(app)
+app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1)
 
-# Load configuration
-def get_settings():
-    return {
-        "environment": os.getenv("ENVIRONMENT", "development"),
-        "openai_api_key": os.getenv("OPENAI_API_KEY"),
-        "google_ads_developer_token": os.getenv("GOOGLE_ADS_DEVELOPER_TOKEN"),
-    }
+# Initialize database
+init_mongodb(app)
 
-@app.before_first_request
-def before_first_request():
-    """Run before the first request is processed"""
-    logger.info("Starting Google Ads AI Agent application")
-    settings = get_settings()
-    logger.info(f"Environment: {settings['environment']}")
-    
-    # Validate required settings
-    if not settings.get("openai_api_key"):
-        logger.warning("OpenAI API key not found in environment variables")
+# Initialize babel
+babel = Babel(app)
+babel.init_app(app)
 
+# Initialize services
+campaignService = CampaignService()
 
+campaignController = CampaignController(campaignService)
+app.register_blueprint(campaignController.campaignBluePrint)
 
+businessService = BusinessService()
+businessController=BusinessController(businessService)
+
+app.register_blueprint(businessController.businessBluePrint)
+
+agentService = AgentService()
+agentController=AgentController(agentService)
+app.register_blueprint(agentController.agentBluePrint)
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000, debug=True)
+    app.run(host="0.0.0.0", port=8080, debug=True)

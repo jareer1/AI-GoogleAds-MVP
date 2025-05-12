@@ -8,4 +8,5 @@ class CampaignCreateReqVM(Schema):
     location=fields.Str(required=True)
     budget=fields.Float(required=True)
     mediaPlan=fields.Str(required=True)
+    userId=fields.Str(required=True)
     

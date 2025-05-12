@@ -15,6 +15,9 @@ from .Controller.CampaignController import CampaignController
 from .database import init_mongodb
 from .Controller.BusinessController import BusinessController
 from .Services.BusinessService import BusinessService
+from .Services.UserService import UserService
+from .Controller.UserController import UserController
+
 # Configure logging
 logger = logging.getLogger(__name__)
 
@@ -48,6 +51,12 @@ app.register_blueprint(businessController.businessBluePrint)
 agentService = AgentService()
 agentController=AgentController(agentService)
 app.register_blueprint(agentController.agentBluePrint)
+
+
+user_service = UserService()
+user_controller = UserController(user_service)
+
+app.register_blueprint(user_controller.userBluePrint)
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=8080, debug=True)

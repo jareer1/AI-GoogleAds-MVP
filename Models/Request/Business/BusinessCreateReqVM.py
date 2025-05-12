@@ -10,3 +10,4 @@ class BusinessCreateReqVM(Schema):
     mainCategory = fields.Str(required=True)
     secondaryCategories = fields.List(fields.Str(),required=False)
     serviceAreas = fields.List(fields.Str(),required=False)
+    campaignId = fields.Str(required=True)

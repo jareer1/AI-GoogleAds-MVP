@@ -1,5 +1,6 @@
 from datetime import datetime
 from ..database import mongo
+from bson import ObjectId
 
 class BusinessService:
     def create(self, business_data):
@@ -12,7 +13,8 @@ class BusinessService:
             # Set default values for optional fields
             business_data.setdefault('secondaryCategories', [])
             business_data.setdefault('serviceAreas', [])
-            
+            business_data['campaignId'] = ObjectId(business_data['campaignId'])
+
             # Insert into database
             result = mongo.db.Business.insert_one(business_data)
             

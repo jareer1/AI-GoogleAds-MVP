@@ -3,6 +3,7 @@ from ..Services.BusinessService import BusinessService
 from marshmallow import ValidationError
 
 from ..Models.Request.Business.BusinessCreateReqVM import BusinessCreateReqVM
+from ..SharedComponents.AuthToken import tokenRequired
 class BusinessController:
     def __init__(self, business_service):
         self.businessBluePrint = Blueprint('business', __name__)
@@ -11,7 +12,8 @@ class BusinessController:
         
     def setup_routes(self):
         self.businessBluePrint.route('/business', methods=['POST'])(self.create)
-        
+
+    @tokenRequired()    
     def create(self):
         try:
             business_data = request.get_json()  

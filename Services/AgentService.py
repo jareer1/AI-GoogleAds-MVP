@@ -9,7 +9,12 @@ import json
 from google.ads.googleads.client import GoogleAdsClient
 from ..config import GOOGLE_ADS_DEVELOPER_TOKEN, GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET
 from google.protobuf import field_mask_pb2
-
+from langchain.prompts import (
+    ChatPromptTemplate,
+    SystemMessagePromptTemplate,
+    HumanMessagePromptTemplate,
+    AIMessagePromptTemplate
+)
 
 class AgentService:
     def __init__(self):
@@ -22,22 +27,59 @@ class AgentService:
             temperature=0.0,
         )
 
-        # Wrap your template in a ChatPromptTemplate
+ 
+
         self.prompt = ChatPromptTemplate.from_messages([
             SystemMessagePromptTemplate.from_template(
-                "You are a keyword generator for Google Ads. Respond ONLY with keywords, one per line. No additional text, explanations, or formatting."
-            ),
-            HumanMessagePromptTemplate.from_template(
-                """Based on this information, generate relevant keywords:
-
-                Business Information:
-                {business_info}
-
-                Campaign Information:
-                {campaign_info}
                 """
+        You are a Google Ads keyword generation expert. Follow these strict rules:
+        1. Respond ONLY with a list of keywords, one per line—no numbering, bullet points, or punctuation.
+        2. Use only terms directly supported by the provided Business and Campaign Information.
+        3. Do NOT invent products, features, or services not mentioned in the inputs.
+        4. If the information is insufficient to generate any keywords, respond with EXACTLY:
+        INSUFFICIENT_INFO
+        5. Ensure all keywords are relevant to Google Ads best practices (e.g., use plausible search terms customers might use).
+        """
+            ),
+
+            # Few-shot example to guide the model
+            HumanMessagePromptTemplate.from_template(
+                """
+        Example:
+        Business Information:
+        A local bakery specializing in gluten-free pastries and artisan breads.
+
+        Campaign Information:
+        Launch campaign for new morning muffin selection featuring banana and blueberry.
+
+        Generate relevant keyword ideas:
+        """
+            ),
+            AIMessagePromptTemplate.from_template(
+                """
+        gluten-free banana muffins
+        gluten-free blueberry muffins
+        artisan banana muffins
+        artisan blueberry muffins
+        morning gluten-free pastries
+        gluten-free breakfast muffins
+        """
+            ),
+
+            # Actual user input
+            HumanMessagePromptTemplate.from_template(
+                """
+        Business Information:
+        {business_info}
+
+        Campaign Information:
+        {campaign_info}
+
+        Generate relevant keyword ideas:
+        """
             )
         ])
+
 
         self.chain = LLMChain(llm=self.chat_llm, prompt=self.prompt)
 
@@ -108,25 +150,38 @@ class AgentService:
             f"Target Audience: {campaign.get('targetAudience', 'Not specified')}"
         )
         keywords_info = "Keywords: " + ", ".join(keywords)
-
+        print("Business Info:", business_info)
         # Escape the JSON braces by doubling them:
-        system_message = """You are an ad copy generator for Google Ads. Generate a compelling ad in JSON format. Do not include any additional text or explanations. Only return a valid JSON object with this exact structure: {{  
-        "headlines": ["Headline 1", "Headline 2", "Headline 3"],  
-        "descriptions": ["Description Line 1", "Description Line 2"],  
-        "displayUrl": "www.example.com",  
-        "callToAction": "Call to action phrase"  
-        }}"""
 
-        human_message = """Generate an ad based on:
+# Enhanced ad copy generator prompt with best practices and support for multiple ads
+        system_message = """
+You are an expert Google Ads copywriter. Follow these strict rules:
+1. Respond ONLY with JSON—no additional text, explanations, or formatting.
+2. If generating multiple ads, return a JSON list of ad objects; otherwise, return a single JSON object.
+3. Use this exact structure for each ad:
+{{
+    "headlines": ["Headline 1", "Headline 2", "Headline 3"],
+    "descriptions": ["Description Line 1", "Description Line 2"],
+    "displayUrl": "www.example.com",
+    "callToAction": "Call to action phrase"
+}}
+4. Do NOT invent URLs, products, or CTAs not supported by the inputs.
+5. If there is insufficient information, respond with EXACTLY: INSUFFICIENT_INFO
+"""
 
-    Business Information:
-    {business_info}
 
-    Campaign Information:
-    {campaign_info}
+        human_message = """
+        Generate an ad based on:
 
-    Target Keywords:
-    {keywords_info}"""
+        Business Information:
+        {business_info}
+
+        Campaign Information:
+        {campaign_info}
+
+        Target Keywords:
+        {keywords_info}
+        """
 
         ad_prompt = ChatPromptTemplate.from_messages([
             SystemMessagePromptTemplate.from_template(system_message),
@@ -145,7 +200,6 @@ class AgentService:
             ad_content = json.loads(json_str)
         else:
             ad_content = json.loads(result.content)
-
         ad_document = {
             'headlines': ad_content['headlines'],
             'descriptions': ad_content['descriptions'],

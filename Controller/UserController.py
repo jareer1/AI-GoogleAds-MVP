@@ -26,14 +26,15 @@ class UserController:
             except ValidationError as e:
                 return jsonify({'message':"Bad Request"}), 400
             # Call service to create user
-            user_id, user_email = self.userService.createUser(
+            user_id, user_email,token = self.userService.createUser(
                 email=validated_data['email'],
                 password=validated_data['password']
             )
 
             return jsonify({
                 'userId': str(user_id),
-                'userEmail': user_email
+                'userEmail': user_email,
+                'token': token
             }), 201
 
         except Exception as e:
@@ -50,14 +51,15 @@ class UserController:
             except ValidationError as e:
                 return jsonify({'message':"Bad Request"}), 400
             # Call service to verify credentials
-            user_id, user_email = self.userService.login(
+            user_id, user_email,token = self.userService.login(
                 email=validated_data['email'],
                 password=validated_data['password']
             )
 
             return jsonify({
                 'userId': str(user_id),
-                'userEmail': user_email
+                'userEmail': user_email,
+                'token': token
             }), 200
 
         except Exception as e:

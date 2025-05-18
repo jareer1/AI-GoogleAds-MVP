@@ -1,6 +1,7 @@
 from flask import Blueprint, request, jsonify
 from marshmallow import ValidationError
 from ..Models.Request.Agents.AdGroupReqVM import AdGroupCreateReq
+from ..SharedComponents.AuthToken import tokenRequired
 class AgentController:
     def __init__(self, agentService):
         self.agentBluePrint = Blueprint('agent', __name__)
@@ -15,7 +16,7 @@ class AgentController:
         self.agentBluePrint.route('/agent/create-ad-group', methods=['POST'])(self.create_ad_group)
         self.agentBluePrint.route('/agent/disable-campaign/<user_id>', methods=['GET'])(self.disable_campaign)
 
-
+    @tokenRequired()
     def getKeywords(self, campaignId):
         try:
             print("Campaign ID:", campaignId)
@@ -38,13 +39,12 @@ class AgentController:
             
         except Exception as e:
             return jsonify({'error': str(e)}), 500
+    
+    @tokenRequired()
     def getAd(self, campaignId):
         try:
-            print("Campaign ID:", campaignId)
             campaign = self.agentService.getCampaign(campaignId)
-            print("Campaign:", campaign)
             adGroupId=self.agentService.getAdGroupIdByCampaignId(campaignId)
-            print("Ad Group ID:", adGroupId)
             if not campaign:
                 return jsonify({'error': 'Campaign not found'}), 404
             business = self.agentService.getBusiness(campaignId)
@@ -52,6 +52,7 @@ class AgentController:
                 return jsonify({'error': 'Business not found'}), 404
             # Get keywords
             keywords = self.agentService.getKeywordsFromDB(adGroupId)
+            print('keywords:', keywords)
             if not keywords:
                 return jsonify({'error': 'No keywords found for this campaign'}), 404
             # Generate ad using LLM
@@ -64,7 +65,7 @@ class AgentController:
         except Exception as e:
             return jsonify({'error': str(e)}), 500
 
-
+    @tokenRequired()
     def launchCampaign(self,user_id):
         try:
             # Get userId from query parameters
@@ -123,7 +124,7 @@ class AgentController:
         except Exception as e:
             print(f"Error launching campaign: {str(e)}")
             return jsonify({'error': str(e)}), 500    
-        # Example usage in your API route handler:
+    @tokenRequired()
     def enable_campaign(self,user_id):
         try:
             campaignId = request.args.get('campaignId')
@@ -144,6 +145,7 @@ class AgentController:
             
         except Exception as e:
             return {"error": str(e)}, 400
+    @tokenRequired()
     def create_ad_group(self):
         try:
             data = request.get_json()
@@ -161,6 +163,8 @@ class AgentController:
             
         except Exception as e:
             return jsonify({'error': str(e)}), 500
+    
+    @tokenRequired()
     def disable_campaign(self, user_id):
         try:
             campaignId = request.args.get('campaignId')

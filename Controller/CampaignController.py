@@ -1,7 +1,7 @@
 from flask import Blueprint, request, jsonify
 from marshmallow import ValidationError
 from ..Models.Request.Campaign.CampaignCreateReqVM import CampaignCreateReqVM
-
+from ..SharedComponents.AuthToken import tokenRequired
 class CampaignController:
     def __init__(self, campaignService):
         self.campaignBluePrint = Blueprint('campaign', __name__, url_prefix='/campaign')
@@ -14,7 +14,8 @@ class CampaignController:
         self.campaignBluePrint.route('/<campaign_id>', methods=['GET'])(self.getCampaign)
         self.campaignBluePrint.route('/<campaign_id>', methods=['DELETE'])(self.deleteCampaign)
         self.campaignBluePrint.route('/all/<user_id>', methods=['GET'])(self.getAllCampaigns)
-
+    
+    @tokenRequired()
     def create(self):
         try:
             campaignData = request.get_json()
@@ -35,6 +36,8 @@ class CampaignController:
         except ValidationError as e:
             # Handle marshmallow validation errors
             return jsonify({'error': 'Bad request'}), 400
+    
+    @tokenRequired()
     def update(self, campaign_id):
         try:
             # Get and validate request data
@@ -63,7 +66,8 @@ class CampaignController:
         except Exception as e:
             print(f"Error updating campaign: {str(e)}")
             return jsonify({'error': str(e)}), 500
-        
+
+    @tokenRequired()    
     def getCampaign(self,campaign_id):
         try:
             # Get campaign by ID
@@ -76,6 +80,9 @@ class CampaignController:
         except Exception as e:
             print(f"Error retrieving campaign: {str(e)}")
             return jsonify({'error': str(e)}), 500
+    
+    
+    @tokenRequired()
     def getAllCampaigns(self,user_id):
         try:
             campaigns = self.campaignService.getAllCampaigns(user_id)
@@ -84,6 +91,8 @@ class CampaignController:
         except Exception as e:
             print(f"Error retrieving campaigns: {str(e)}")
             return jsonify({'error': str(e)}), 500
+    
+    @tokenRequired()
     def deleteCampaign(self,campaign_id):
         try:
             # Check if campaign exists

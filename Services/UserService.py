@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timedelta
 from ..database import mongo
 from bson import ObjectId
 from google.oauth2.credentials import Credentials
@@ -7,8 +7,9 @@ from werkzeug.security import generate_password_hash
 from datetime import datetime
 from bson import ObjectId
 from werkzeug.security import check_password_hash
+import jwt
 
-
+from ..SharedComponents.keys import loadPrivateKey
 from google_auth_oauthlib.flow import Flow
 import secrets
 import os
@@ -48,8 +49,8 @@ class UserService:
 
             # Insert into database
             result = mongo.db.Users.insert_one(user)
-            
-            return result.inserted_id, email
+            token= self.generateToken(result.inserted_id)
+            return result.inserted_id, email,token
 
         except Exception as e:
             print(f"Error creating user: {str(e)}")
@@ -76,8 +77,9 @@ class UserService:
                     }
                 }
             )
+            token= self.generateToken(user['_id'])
 
-            return user['_id'], user['email']
+            return user['_id'], user['email'],token
 
         except Exception as e:
             print(f"Error in login: {str(e)}")
@@ -259,3 +261,17 @@ class UserService:
         except Exception as e:
             print(f"Error in get_customer_ids: {str(e)}")
             raise
+    def generateToken(self,user_id):
+        user_id = str(user_id)
+
+        private_key_pem = loadPrivateKey()
+        now = datetime.utcnow()
+        payload = {
+            'sub': user_id,
+            'iat': now,
+            'exp': now + timedelta(days=1),
+            # add other custom claims here
+        }
+        # jwt.encode returns a str in PyJWT>=2.x
+        token = jwt.encode(payload, private_key_pem, algorithm='RS256')
+        return token

@@ -250,6 +250,14 @@ class UserService:
             response = customer_service.list_accessible_customers()
             customer_ids = [resource_name.split('/')[1] for resource_name in response.resource_names]
             print("Customer IDs:", customer_ids)
+            mongo.db.Users.update_one(
+                {'email': email},
+                {
+                    '$set': {
+                        'customerIds': customer_ids,
+                    }
+                }
+            )
             # customers = self.get_customer_names(client, customer_ids)
             
                 
@@ -273,3 +281,12 @@ class UserService:
         # jwt.encode returns a str in PyJWT>=2.x
         token = jwt.encode(payload, private_key_pem, algorithm='RS256')
         return token
+    def getCustomerIdsFromDB(self,userId):
+        try:
+            user = mongo.db.Users.find_one({'_id': ObjectId(userId)})
+            if not user or 'customerIds' not in user:
+                return []
+            return user['customerIds']
+        except Exception as e:
+            print(f"Error fetching customer IDs from DB: {str(e)}")
+            return []

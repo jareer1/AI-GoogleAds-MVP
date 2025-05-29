@@ -14,4 +14,4 @@ GOOGLE_CLIENT_ID="310654508589-d1vm4tkv14rs3i0doh594r7209tgmc93.apps.googleuserc
 GOOGLE_CLIENT_SECRET="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"
 env='dev'
 if env=='dev':
-    frontendUrl = "http://localhost:5000/user/oauth2callback"
+    frontendUrl = "http://localhost:3000/dashboard/google-ads-callback"

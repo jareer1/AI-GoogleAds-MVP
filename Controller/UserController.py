@@ -14,7 +14,7 @@ class UserController:
         self.userBluePrint.route('/oauth2callback')(self.oauth2callback)
         self.userBluePrint.route('/signup',methods=['POST'])(self.signup)
         self.userBluePrint.route('/login', methods=['POST'])(self.login)
-
+        self.userBluePrint.route('/customerIds/<userId>', methods=['GET'])(self.getCustomerIds)  # Reusing signup for user creation
     def signup(self):
         try:
             data = request.get_json()
@@ -108,5 +108,17 @@ class UserController:
 
             
         except Exception as e:
+            return jsonify({'error': str(e)}), 500
+    def getCustomerIds(self, userId):
+        try:
+            # Get customer IDs for the user
+            customer_ids = self.userService.getCustomerIdsFromDB(userId)
+            if not customer_ids:
+                return jsonify({'message': 'No customer IDs found'}), 404
+            
+            return jsonify({'customerIds': customer_ids}), 200
+            
+        except Exception as e:
+            print(f"Error fetching customer IDs: {str(e)}")
             return jsonify({'error': str(e)}), 500
         

@@ -93,8 +93,6 @@ class UserService:
             })
             print(f"Existing user: {existing_user}")
             
-            if existing_user and existing_user.get('refresh_token'):
-                return None, "User already authenticated"
                 
             # Create or update user
             state = secrets.token_urlsafe(32)

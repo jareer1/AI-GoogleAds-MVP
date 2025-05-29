@@ -17,7 +17,8 @@ from .Controller.BusinessController import BusinessController
 from .Services.BusinessService import BusinessService
 from .Services.UserService import UserService
 from .Controller.UserController import UserController
-
+from .Controller.DashboardController import DashboardController
+from .Services.DashboardService import DashboardService
 # Configure logging
 logger = logging.getLogger(__name__)
 
@@ -57,6 +58,10 @@ user_service = UserService()
 user_controller = UserController(user_service)
 
 app.register_blueprint(user_controller.userBluePrint)
+
+dashboardService = DashboardService(agentService)
+dashboardController = DashboardController(dashboardService)
+app.register_blueprint(dashboardController.dashboardBluePrint)
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=8080, debug=True)

@@ -9,7 +9,8 @@ class AgentController:
         self.setup_routes()
 
     def setup_routes(self):
-        self.agentBluePrint.route('/agent/<campaignId>', methods=['GET'])(self.getKeywords)
+        self.agentBluePrint.route('/agent/keywords', methods=['POST'])(self.saveKeywords)
+        self.agentBluePrint.route('/agent/<campaignId>', methods=['POST'])(self.getKeywords)
         self.agentBluePrint.route('/agent/ad-generator/<campaignId>', methods=['GET'])(self.getAd)
         self.agentBluePrint.route('/agent/launch-campaign/<user_id>', methods=['GET'])(self.launchCampaign)
         self.agentBluePrint.route('/agent/enable-campaign/<user_id>', methods=['GET'])(self.enable_campaign)
@@ -17,21 +18,31 @@ class AgentController:
         self.agentBluePrint.route('/agent/disable-campaign/<user_id>', methods=['GET'])(self.disable_campaign)
 
     @tokenRequired()
+    def saveKeywords(self):
+        data=request.get_json()
+        success = self.agentService.saveKeywords(data['keywords'], data['adGroupId'])
+        if success:
+            return jsonify({'message': 'Keywords saved successfully'}), 201
+        else:
+            return jsonify({'error': 'Failed to save keywords'}), 400
+
+    @tokenRequired()
     def getKeywords(self, campaignId):
         try:
-            print("Campaign ID:", campaignId)
+            data=request.get_json()
             campaign = self.agentService.getCampaign(campaignId)
-            print("Campaign:", campaign)
-            adGroupId=self.agentService.getAdGroupIdByCampaignId(campaignId)
-            print("Ad Group ID:", adGroupId)
+            adGroupId=data['adGroupId']
+            checkWebsite=data['checkWebsite']
+            keywords=data['keywords']
+            userId=data['userId']
             if not campaign:
                 return jsonify({'error': 'Campaign not found'}), 404
 
-            business = self.agentService.getBusiness(campaignId)
+            business = self.agentService.getBusiness(userId)
             if not business:
                 return jsonify({'error': 'Business not found'}), 404
 
-            keywords, success = self.agentService.getKeywords(campaign, business, adGroupId)
+            keywords, success = self.agentService.getKeywords(campaign, business, adGroupId,checkWebsite,keywords)
             
             if success:
                 return jsonify({'keywords': keywords}), 200

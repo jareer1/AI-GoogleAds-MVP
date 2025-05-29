@@ -15,6 +15,10 @@ from langchain.prompts import (
     HumanMessagePromptTemplate,
     AIMessagePromptTemplate
 )
+from .client import RestClient
+import time
+
+
 
 class AgentService:
     def __init__(self):
@@ -86,55 +90,73 @@ class AgentService:
     def getCampaign(self, campaignId):
         return mongo.db.Campaigns.find_one({'_id': ObjectId(campaignId)})
 
-    def getBusiness(self, campaignId):
-        return mongo.db.Business.find_one({'campaignId': ObjectId(campaignId)})
-    def getAdGroupIdByCampaignId(self, campaignId):
-        ad_group = mongo.db.AdGroup.find_one({'campaignId': ObjectId(campaignId)})
-        if not ad_group:
-            raise Exception("No ad group found for this campaign")
-        return str(ad_group['_id'])
-    def getKeywords(self, campaign, business,adGroupId):
+    def getBusiness(self, userId):
+        return mongo.db.Business.find_one({'userId': ObjectId(userId)})
+    # def getAdGroupIdByCampaignId(self, campaignId):
+    #     ad_group = mongo.db.AdGroup.find_one({'campaignId': ObjectId(campaignId)})
+    #     if not ad_group:
+    #         raise Exception("No ad group found for this campaign")
+    #     return str(ad_group['_id'])
+    def getKeywords(self, campaign, business,adGroupId,checkWebsite,keywords):
         try:
+            dataforSEO_keywords = self.get_dataforseo_keywords(business, campaign,checkWebsite,keywords)
+            print('dataforSEO_keywords:', dataforSEO_keywords)
             business_info = (
                 f"Business Name: {business['businessName']}\n"
                 f"Category: {business['mainCategory']}\n"
                 f"Secondary Categories: {', '.join(business['secondaryCategories'])}\n"
                 f"Service Areas: {', '.join(business['serviceAreas'])}"
+                f"Suggested Keywords: {', '.join(dataforSEO_keywords)}"
             )
             campaign_info = (
                 f"Campaign Focus: {campaign['campaignFocus']}\n"
                 f"Target Audience: {campaign.get('targetAudience', 'Not specified')}"
             )
-            print("Business Info:", business_info)
 
-            # This now calls the chat completions endpoint under the hood
             result = self.chain.invoke({
                 'business_info': business_info,
                 'campaign_info': campaign_info
             })
-            print("LLM Response:", result)
+            
+            # Extract keywords from LLM response
             if isinstance(result, dict) and 'text' in result:
                 keywords_text = result['text']
             else:
                 keywords_text = result.content
-            keywords = [kw.strip() for kw in keywords_text.splitlines() if kw.strip()]
+                
+            llm_keywords = [kw.strip() for kw in keywords_text.splitlines() if kw.strip()]
+            
+            # Get insights for the generated keywords
+            keyword_insights = self.get_keyword_insights(
+                keywords=llm_keywords,
+                location=campaign.get('locationName', 'United States')
+            )
+            
+            
 
-            mongo.db.AdGroup.update_one(
+            return keyword_insights, True
+
+        except Exception as e:
+            print(f"Error in getKeywords: {str(e)}")
+            return str(e), False
+    def saveKeywords(self, keyword_insights, adGroupId):
+        try:
+            result = mongo.db.AdGroup.update_one(
                 {'_id': ObjectId(adGroupId)},
                 {
                     '$set': {
-                        'keywords': keywords,
+                        'keywords': keyword_insights,
                         'keywordsUpdatedAt': datetime.utcnow()
                     }
                 }
             )
-
-
-
-            return keywords, True
-
+            
+            # Check if document was modified
+            return result.modified_count > 0
+            
         except Exception as e:
-            return str(e), False
+            print(f"Error saving keywords: {str(e)}")
+            return False
     def getKeywordsFromDB(self, adGroupId):
         ad_group = mongo.db.AdGroup.find_one({'_id': ObjectId(adGroupId)})
         return ad_group.get('keywords') if ad_group else None
@@ -200,6 +222,7 @@ You are an expert Google Ads copywriter. Follow these strict rules:
             ad_content = json.loads(json_str)
         else:
             ad_content = json.loads(result.content)
+        print('adDocument is ',ad_content)
         ad_document = {
             'headlines': ad_content['headlines'],
             'descriptions': ad_content['descriptions'],
@@ -243,8 +266,7 @@ You are an expert Google Ads copywriter. Follow these strict rules:
             return client
 
         except Exception as e:
-            print(f"Error creating Google Ads client: {str(e)}")
-            raise
+            raise Exception("Google Ads authorization expired. Please reconnect your account.")
     def getCustomerId(self, userId):
         user = mongo.db.Users.find_one({'_id': ObjectId(userId)})
         if not user or 'google_ads_customer_id' not in user:
@@ -256,7 +278,133 @@ You are an expert Google Ads copywriter. Follow these strict rules:
         if not campaign:
             raise Exception("No campaign found for this user")
         return campaign
+    def score_keyword(self, item):
+        try:
+            # Get values with defaults of 0 if None
+            sv = float(item.get("search_volume", 0) or 0)
+            comp = float(item.get("competition_index", 0) or 0)
+            cpc = float(item.get("cpc", 0) or 0)
+            bid = float(item.get("high_top_of_page_bid", 0) or 0)
+            
+            # Ensure competition score is between 0-100
+            comp_score = max(0, min(100 - comp, 100))
+
+            # Calculate weighted score
+            weighted_score = (
+                (sv * 0.4) + 
+                (comp_score * 0.2) + 
+                (cpc * 0.2) + 
+                (bid * 0.2)
+            )
+            
+            return max(0, weighted_score)  # Ensure non-negative score
+            
+        except Exception as e:
+            print(f"Error scoring keyword: {str(e)}")
+            return 0  # Return default score on error
+    def get_dataforseo_keywords(self,business,campaign,checkWebsite,keywords): 
+        try:
+            client = RestClient("admin@insightlytic.com", "258c3414aa949a09")
+
+            if checkWebsite:
+                website = business.get("websiteUrl", "").strip()
+                if not website:
+                    print("No website URL found in business data")
+                    return []
+                
+                post_data = [{
+                    "location_name": campaign.get("locationName"),
+                    "target": website,
+                    "language_name": "English",
+                    "sort_by": "relevance"
+                }]
+                
+                endpoint = "/v3/keywords_data/google_ads/keywords_for_site/live"
+
+            else:
+                if not keywords:
+                    print("No keywords provided for keyword-based lookup")
+                    return []
+                
+                post_data = [{
+                    "location_name": campaign.get("locationName"),
+                    "keywords": keywords,
+                    "language_name": "English",
+                    "sort_by": "relevance"
+                }]
+                
+                endpoint = "/v3/keywords_data/google_ads/keywords_for_keywords/live"
+
+            # Make the API call
+            response = client.post(endpoint, post_data)
+            tasks = response.get("tasks", [])
+            if not tasks:
+                print("No tasks returned from DataForSEO")
+                return []
+            
+            results = tasks[0].get("result", [])
+            
+            # Score and sort
+            scored = [
+                (item, self.score_keyword(item))
+                for item in results
+                if isinstance(item, dict) and "keyword" in item
+            ]
+            scored.sort(key=lambda x: x[1], reverse=True)
+            
+            # Return top 50 keyword strings
+            top_50 = [item["keyword"] for item, _ in scored[:50]]
+            return top_50
+
+        except Exception as e:
+            print(f"Error fetching DataForSEO keywords: {e}")
+            return []
+
     
+    def get_keyword_insights(self, keywords: list, location: str) -> list:
+        """Get specific keyword metrics from DataForSEO"""
+        try:
+            client = RestClient("admin@insightlytic.com", "258c3414aa949a09")
+            
+            # Prepare request payload
+            post_data = [
+                {
+                    "keywords": keywords,
+                    "location_name": location,
+                    "language_name": "English"
+                }
+            ]
+            print(f"Fetching keyword insights for {len(keywords)} keywords in {location}")
+
+            # Make API call
+            response = client.post("/v3/dataforseo_labs/google/keyword_overview/live", post_data)
+            
+            # Process response and extract specific metrics
+            keyword_insights = []
+            
+            if response.get("status_code") == 20000:
+                tasks = response.get("tasks", [])
+                if tasks and "result" in tasks[0]:
+                    for item in tasks[0]["result"][0].get("items", []):
+                        keyword_info = item.get("keyword_info", {})
+                        insight = {
+                            "keyword": item.get("keyword"),
+                            "competition_level": keyword_info.get("competition_level"),
+                            "cpc": keyword_info.get("cpc"),
+                            "search_volume": keyword_info.get("search_volume"),
+                            "low_top_of_page_bid": keyword_info.get("low_top_of_page_bid"),
+                            "high_top_of_page_bid": keyword_info.get("high_top_of_page_bid")
+                        }
+                        keyword_insights.append(insight)
+            
+            print(f"Retrieved insights for {len(keyword_insights)} keywords")
+            return keyword_insights
+
+        except Exception as e:
+            print(f"Error getting keyword insights: {str(e)}")
+            return []
+
+
     def createBudget(self,client, userId,campaignId):
         try:
             customer_id = self.getCustomerId(userId)            

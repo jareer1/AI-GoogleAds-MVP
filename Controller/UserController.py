@@ -2,7 +2,7 @@ from flask import Blueprint, request, jsonify, redirect
 from marshmallow import ValidationError
 from ..Models.Request.User.UserCreateReqVM import UserSignupReqVM
 from ..Services.UserService import UserService
-
+from ..config import frontendUrl
 class UserController:
     def __init__(self, user_service: UserService):
         self.userBluePrint = Blueprint('user', __name__)
@@ -100,11 +100,12 @@ class UserController:
             if not success:
                 return jsonify({'error': result}), 400
             customers = self.userService.get_customer_ids(email)
-            return jsonify({
-                'message':     'Successfully authenticated',
-                'customerIds': customers
-            }), 200
-                
+            customer_ids_param = ','.join(customers)
+
+            redirect_url = f'{frontendUrl}/dashboard/google-ads-callback?customerIds={customer_ids_param}'
+            print('redirect_url:', redirect_url)
+            return redirect(redirect_url)
+
             
         except Exception as e:
             return jsonify({'error': str(e)}), 500

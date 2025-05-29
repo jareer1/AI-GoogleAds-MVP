@@ -1,4 +1,5 @@
 import os
+env = os.environ.get('_ENV')
 DB_USERNAME ='jareer'
 DB_PASSWORD = 'jareer'
 cluster_url = "ai-agent-google.mpscqje.mongodb.net"
@@ -11,4 +12,6 @@ AzureDeploymentName='cognidata-gpt-4o'
 GOOGLE_ADS_DEVELOPER_TOKEN= "s4qUCowkrWMdtTA9-tkxSA"
 GOOGLE_CLIENT_ID="310654508589-d1vm4tkv14rs3i0doh594r7209tgmc93.apps.googleusercontent.com",
 GOOGLE_CLIENT_SECRET="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"
-
+env='dev'
+if env=='dev':
+    frontendUrl = "http://localhost:5000/user/oauth2callback"

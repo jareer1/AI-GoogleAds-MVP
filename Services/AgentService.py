@@ -92,11 +92,11 @@ class AgentService:
 
     def getBusiness(self, userId):
         return mongo.db.Business.find_one({'userId': ObjectId(userId)})
-    # def getAdGroupIdByCampaignId(self, campaignId):
-    #     ad_group = mongo.db.AdGroup.find_one({'campaignId': ObjectId(campaignId)})
-    #     if not ad_group:
-    #         raise Exception("No ad group found for this campaign")
-    #     return str(ad_group['_id'])
+    def getAdGroupIdByCampaignId(self, campaignId):
+        ad_group = mongo.db.AdGroup.find_one({'campaignId': ObjectId(campaignId)})
+        if not ad_group:
+            raise Exception("No ad group found for this campaign")
+        return str(ad_group['_id'])
     def getKeywords(self, campaign, business,adGroupId,checkWebsite,keywords):
         try:
             dataforSEO_keywords = self.get_dataforseo_keywords(business, campaign,checkWebsite,keywords)
@@ -104,12 +104,9 @@ class AgentService:
             business_info = (
                 f"Business Name: {business['businessName']}\n"
                 f"Category: {business['mainCategory']}\n"
-                f"Secondary Categories: {', '.join(business['secondaryCategories'])}\n"
-                f"Service Areas: {', '.join(business['serviceAreas'])}"
                 f"Suggested Keywords: {', '.join(dataforSEO_keywords)}"
             )
             campaign_info = (
-                f"Campaign Focus: {campaign['campaignFocus']}\n"
                 f"Target Audience: {campaign.get('targetAudience', 'Not specified')}"
             )
 
@@ -160,6 +157,9 @@ class AgentService:
     def getKeywordsFromDB(self, adGroupId):
         ad_group = mongo.db.AdGroup.find_one({'_id': ObjectId(adGroupId)})
         return ad_group.get('keywords') if ad_group else None
+
+
+
     def getAd(self, campaign, business, keywords):
         business_info = (
             f"Business Name: {business['businessName']}\n"
@@ -168,83 +168,120 @@ class AgentService:
             f"Service Areas: {', '.join(business['serviceAreas'])}"
         )
         campaign_info = (
-            f"Campaign Focus: {campaign['campaignFocus']}\n"
             f"Target Audience: {campaign.get('targetAudience', 'Not specified')}"
         )
-        keywords_info = "Keywords: " + ", ".join(keywords)
-        print("Business Info:", business_info)
-        # Escape the JSON braces by doubling them:
+        keyword_strings = []
+        for k in keywords:
+            if isinstance(k, dict) and 'keyword' in k:
+                keyword_strings.append(f"{k['keyword']}")
 
-# Enhanced ad copy generator prompt with best practices and support for multiple ads
-        system_message = """
-You are an expert Google Ads copywriter. Follow these strict rules:
-1. Respond ONLY with JSON—no additional text, explanations, or formatting.
-2. If generating multiple ads, return a JSON list of ad objects; otherwise, return a single JSON object.
-3. Use this exact structure for each ad:
-{{
-    "headlines": ["Headline 1", "Headline 2", "Headline 3"],
-    "descriptions": ["Description Line 1", "Description Line 2"],
-    "displayUrl": "www.example.com",
-    "callToAction": "Call to action phrase"
-}}
-4. Do NOT invent URLs, products, or CTAs not supported by the inputs.
-5. If there is insufficient information, respond with EXACTLY: INSUFFICIENT_INFO
-"""
+        keywords_info = "Keywords:\n" + "\n".join(keyword_strings)
 
+        prompt = ChatPromptTemplate.from_messages([
+            SystemMessagePromptTemplate.from_template("""
+    You are an expert Google Ads copywriter. Generate a complete ad package in JSON format.
+    The response must contain only a valid JSON object with exactly:
+    - 5 headlines (max 30 chars each)
+    - 5 descriptions (max 90 chars each)
+    - 3 callouts (max 25 chars each)
+    - 3 sitelinks (max 25 chars text, 35 chars descriptions)
 
-        human_message = """
-        Generate an ad based on:
+    Example format:
+    {{
+        "headlines": ["Headline 1", "Headline 2", "Headline 3", "Headline 4", "Headline 5"],
+        "descriptions": ["Description 1", "Description 2", "Description 3", "Description 4", "Description 5"],
+        "callouts": [
+            {{
+                "text": "Callout text",
+                "schedule": {{ "day_of_week": "MONDAY", "start_hour": 9, "end_hour": 17 }}
+            }}
+        ],
+        "sitelinks": [
+            {{
+                "text": "Sitelink text",
+                "final_url": "{{website_url}}",
+                "description_1": "First description line",
+                "description_2": "Second description line"
+            }}
+        ]
+    }}
+            """),
+            HumanMessagePromptTemplate.from_template("""
+    Create an ad using:
 
-        Business Information:
-        {business_info}
+    Business Information:
+    {business_info}
 
-        Campaign Information:
-        {campaign_info}
+    Campaign Information:
+    {campaign_info}
 
-        Target Keywords:
-        {keywords_info}
-        """
-
-        ad_prompt = ChatPromptTemplate.from_messages([
-            SystemMessagePromptTemplate.from_template(system_message),
-            HumanMessagePromptTemplate.from_template(human_message)
+    Target Keywords:
+    {keywords_info}
+            """)
         ])
 
-        ad_chain = LLMChain(llm=self.chat_llm, prompt=ad_prompt)
+        ad_chain = LLMChain(llm=self.chat_llm, prompt=prompt)
         result = ad_chain.invoke({
             'business_info': business_info,
             'campaign_info': campaign_info,
             'keywords_info': keywords_info
         })
         print("LLM Response:", result)
+
+        # Parse the LLM’s JSON output
         if isinstance(result, dict) and 'text' in result:
             json_str = result['text'].replace('```json\n', '').replace('\n```', '')
             ad_content = json.loads(json_str)
         else:
             ad_content = json.loads(result.content)
-        print('adDocument is ',ad_content)
+
+        print('adDocument is ', ad_content)
         ad_document = {
             'headlines': ad_content['headlines'],
             'descriptions': ad_content['descriptions'],
-            'displayUrl': ad_content['displayUrl'],
-            'callToAction': ad_content['callToAction'],
-            'campaignId': campaign['_id'],
+            'callouts': ad_content.get('callouts', []),
+            'sitelinks': ad_content.get('sitelinks', []),
+            'campaignId': str(campaign['_id']),
             'createdAt': datetime.utcnow(),
-            'status': 'active'
+            'status': 'active',
+            'published': False
         }
 
-        # Store in MongoDB Ads collection
-        mongo.db.Ads.insert_one(ad_document)
+        return ad_document, True
+
+    def saveAd(self, adDocument):
+        try:
+            # Convert campaignId from string to ObjectId
+            if 'campaignId' in adDocument and isinstance(adDocument['campaignId'], str):
+                adDocument['campaignId'] = ObjectId(adDocument['campaignId'])
+                
+            # Set timestamps
+            adDocument['createdAt'] = datetime.utcnow()
+            adDocument['status'] = 'active'
+            adDocument['published'] = False
+            
+            # Insert the document
+            result = mongo.db.Ads.insert_one(adDocument)
+            
+            # Verify insertion
+            if result.inserted_id:
+                print(f"Ad saved successfully with ID: {result.inserted_id}")
+                return True
+                
+            return False
+            
+        except Exception as e:
+            print(f"Error saving ad: {str(e)}")
+            return False
+
     
-        return ad_content, True
-    
-    def getClient(self, userId: str):
+    def getClient(self, userId,customerId):
         try:
             user = mongo.db.Users.find_one({'_id': ObjectId(userId)})
             if not user:
                 raise Exception("User not found")
             
-            if not user.get('refresh_token') or not user.get('google_ads_customer_id'):
+            if not user.get('refresh_token'):
                 raise Exception("User missing required Google Ads credentials")
 
             print(f"Creating client for user: {user['email']}")
@@ -255,7 +292,7 @@ You are an expert Google Ads copywriter. Follow these strict rules:
                 "client_id": str(GOOGLE_CLIENT_ID[0] if isinstance(GOOGLE_CLIENT_ID, tuple) else GOOGLE_CLIENT_ID),
                 "client_secret": str(GOOGLE_CLIENT_SECRET),
                 "refresh_token": str(user['refresh_token']),
-                "login_customer_id": str(user['google_ads_customer_id']),
+                "login_customer_id": customerId,
                 "use_proto_plus": True
             }
             
@@ -266,12 +303,13 @@ You are an expert Google Ads copywriter. Follow these strict rules:
             return client
 
         except Exception as e:
+            print(f"Error creating Google Ads client: {str(e)}")
             raise Exception("Google Ads authorization expired. Please reconnect your account.")
-    def getCustomerId(self, userId):
-        user = mongo.db.Users.find_one({'_id': ObjectId(userId)})
-        if not user or 'google_ads_customer_id' not in user:
+    def getCustomerId(self, campaignId):
+        campaign = mongo.db.Campaigns.find_one({'_id': ObjectId(campaignId)})
+        if not campaign or 'customerId' not in campaign:
             raise Exception("User not found or missing Google Ads customer ID")
-        return user['google_ads_customer_id']
+        return campaign['customerId']
     def getCampaignByCampaignId(self, campaignId):
 
         campaign = mongo.db.Campaigns.find_one({'_id': ObjectId(campaignId)})
@@ -407,7 +445,7 @@ You are an expert Google Ads copywriter. Follow these strict rules:
 
     def createBudget(self,client, userId,campaignId):
         try:
-            customer_id = self.getCustomerId(userId)            
+            customer_id = self.getCustomerId(campaignId)            
             campaign = self.getCampaignByCampaignId(campaignId)            
             budget_service = client.get_service("CampaignBudgetService")            
             operation = client.get_type("CampaignBudgetOperation")
@@ -437,7 +475,7 @@ You are an expert Google Ads copywriter. Follow these strict rules:
             raise
     def enable_campaign(self, client, userId,campaignId):
         try:
-            customer_id = self.getCustomerId(userId)
+            customer_id = self.getCustomerId(campaignId)
             campaign = self.getCampaignByCampaignId(campaignId)
             
             if not campaign.get('resourceName'):
@@ -476,7 +514,7 @@ You are an expert Google Ads copywriter. Follow these strict rules:
 
     def createCampaign(self, client, userId,campaignId):
         try:
-            customer_id = self.getCustomerId(userId)
+            customer_id = self.getCustomerId(campaignId)
             campaign = self.getCampaignByCampaignId(campaignId)
             
             if 'budgetResourceName' not in campaign:
@@ -575,18 +613,19 @@ You are an expert Google Ads copywriter. Follow these strict rules:
                 ad_group_criterion_service = client.get_service("AdGroupCriterionService")
                 keyword_operations = []
 
-                for keyword in ad_group_data['keywords']:
-                    operation = client.get_type("AdGroupCriterionOperation")
-                    criterion = operation.create
-                    criterion.ad_group = ad_group_resource_name
-                    criterion.keyword.text = keyword
-                    criterion.keyword.match_type = client.enums.KeywordMatchTypeEnum.BROAD
-                    keyword_operations.append(operation)
-
-                if keyword_operations:
-                    keyword_response = ad_group_criterion_service.mutate_ad_group_criteria(
-                        customer_id=customer_id,
-                        operations=keyword_operations
+                # Extract keyword text from keyword objects
+                for keyword_obj in ad_group_data['keywords']:
+                    if isinstance(keyword_obj, dict) and 'keyword' in keyword_obj:
+                        operation = client.get_type("AdGroupCriterionOperation")
+                        criterion = operation.create
+                        criterion.ad_group = ad_group_resource_name
+                        criterion.keyword.text = keyword_obj['keyword']  # Get keyword text from object
+                        criterion.keyword.match_type = client.enums.KeywordMatchTypeEnum.BROAD
+                        keyword_operations.append(operation)
+                    if keyword_operations:
+                        keyword_response = ad_group_criterion_service.mutate_ad_group_criteria(
+                            customer_id=customer_id,
+                            operations=keyword_operations
                     )
                     
                     # Store keyword resource names
@@ -620,20 +659,9 @@ You are an expert Google Ads copywriter. Follow these strict rules:
 
         except Exception as e:
             # Update status to FAILED if there's an error
-            if 'ad_group_data' in locals() and ad_group_data:
-                mongo.db.AdGroup.update_one(
-                    {'_id': ad_group_data['_id']},
-                    {
-                        '$set': {
-                            'status': 'FAILED',
-                            'error': str(e),
-                            'completedAt': datetime.utcnow()
-                        }
-                    }
-                )
             print(f"Error creating ad group: {str(e)}")
             raise
-    def createResponsiveSearchAds(self, client, customer_id, ad_group_resource_name, campaignId):
+    def createResponsiveSearchAds(self, client, customer_id, ad_group_resource_name, campaignId,user_id):
         try:
             ads = self.getAdsByCampaignId(campaignId)
             if not ads:
@@ -641,10 +669,10 @@ You are an expert Google Ads copywriter. Follow these strict rules:
 
             ad_service = client.get_service("AdGroupAdService")
             created_ads = []
-
+            business=self.getBusiness(userId=user_id)
             for ad_content in ads:
                 # Validate and fix URL first
-                display_url = ad_content['displayUrl'].strip()
+                display_url = business['websiteUrl'].strip()
                 if not display_url.startswith(('http://', 'https://')):
                     if display_url.startswith('www.'):
                         display_url = f'https://{display_url}'
@@ -734,7 +762,7 @@ You are an expert Google Ads copywriter. Follow these strict rules:
             
     def disable_campaign(self, client, userId, campaignId):
         try:
-            customer_id = self.getCustomerId(userId)
+            customer_id = self.getCustomerId(campaignId)
             campaign = self.getCampaignByCampaignId(campaignId)
             
             if not campaign.get('resourceName'):

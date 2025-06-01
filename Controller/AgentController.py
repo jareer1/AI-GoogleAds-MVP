@@ -2,6 +2,7 @@ from flask import Blueprint, request, jsonify
 from marshmallow import ValidationError
 from ..Models.Request.Agents.AdGroupReqVM import AdGroupCreateReq
 from ..SharedComponents.AuthToken import tokenRequired
+from ..Models.Request.Agents.AdReqVM import AdReqVM
 class AgentController:
     def __init__(self, agentService):
         self.agentBluePrint = Blueprint('agent', __name__)
@@ -11,11 +12,13 @@ class AgentController:
     def setup_routes(self):
         self.agentBluePrint.route('/agent/keywords', methods=['POST'])(self.saveKeywords)
         self.agentBluePrint.route('/agent/<campaignId>', methods=['POST'])(self.getKeywords)
-        self.agentBluePrint.route('/agent/ad-generator/<campaignId>', methods=['GET'])(self.getAd)
+        self.agentBluePrint.route('/agent/ad-generator/<user_id>', methods=['GET'])(self.getAd)
         self.agentBluePrint.route('/agent/launch-campaign/<user_id>', methods=['GET'])(self.launchCampaign)
         self.agentBluePrint.route('/agent/enable-campaign/<user_id>', methods=['GET'])(self.enable_campaign)
         self.agentBluePrint.route('/agent/create-ad-group', methods=['POST'])(self.create_ad_group)
         self.agentBluePrint.route('/agent/disable-campaign/<user_id>', methods=['GET'])(self.disable_campaign)
+        self.agentBluePrint.route('/agent/save-ad', methods=['POST'])(self.saveAd)
+
 
     @tokenRequired()
     def saveKeywords(self):
@@ -52,18 +55,19 @@ class AgentController:
             return jsonify({'error': str(e)}), 500
     
     @tokenRequired()
-    def getAd(self, campaignId):
+    def getAd(self, user_id):
         try:
+            campaignId = request.args.get('campaignId')
             campaign = self.agentService.getCampaign(campaignId)
             adGroupId=self.agentService.getAdGroupIdByCampaignId(campaignId)
             if not campaign:
                 return jsonify({'error': 'Campaign not found'}), 404
-            business = self.agentService.getBusiness(campaignId)
+            business = self.agentService.getBusiness(user_id)
             if not business:
                 return jsonify({'error': 'Business not found'}), 404
             # Get keywords
             keywords = self.agentService.getKeywordsFromDB(adGroupId)
-            print('keywords:', keywords)
+            print(f"Keywords for ad generation: {keywords}")
             if not keywords:
                 return jsonify({'error': 'No keywords found for this campaign'}), 404
             # Generate ad using LLM
@@ -84,13 +88,13 @@ class AgentController:
                 return jsonify({'error': 'userId is required'}), 400
             campaignId = request.args.get('campaignId')
             # 1. Get customer ID and create client
-            customer_id = self.agentService.getCustomerId(user_id)
+            customer_id = self.agentService.getCustomerId(campaignId)
             if not customer_id:
                 return jsonify({'error': 'Google Ads customer ID not found'}), 404
 
             # 2. Get campaign details
             campaign = self.agentService.getCampaignByCampaignId(campaignId)
-            client=self.agentService.getClient(user_id)
+            client=self.agentService.getClient(user_id,customer_id)
             if not campaign:
                 return jsonify({'error': 'Campaign not found'}), 404
 
@@ -118,7 +122,8 @@ class AgentController:
                 client,
                 customer_id,
                 ad_group_resource,
-                campaign['_id']
+                campaign['_id'],
+                user_id
             )
             
             # 7. Return success response with created resources
@@ -139,8 +144,9 @@ class AgentController:
     def enable_campaign(self,user_id):
         try:
             campaignId = request.args.get('campaignId')
-            client = self.agentService.getClient(user_id)
             campaign = self.agentService.getCampaignByCampaignId(campaignId)
+            customerId=campaign['customerId']
+            client = self.agentService.getClient(user_id, customerId)
             
             if not campaign.get('resourceName'):
                 raise Exception("Campaign resource name not found")
@@ -165,7 +171,7 @@ class AgentController:
                 # Validate the request data
                 adGroupCreateReq().load(data)
             except ValidationError as err:  
-                return jsonify({'error': 'bad request'}), 400
+                return jsonify({'error': 'Bad Request'}), 400
                   
             self.agentService.storeAdGroup(data)
             return jsonify({
@@ -179,8 +185,9 @@ class AgentController:
     def disable_campaign(self, user_id):
         try:
             campaignId = request.args.get('campaignId')
-            client = self.agentService.getClient(user_id)
             campaign = self.agentService.getCampaignByCampaignId(campaignId)
+            customerId = campaign.get('customerId', None)
+            client = self.agentService.getClient(user_id,customerId)
             
             if not campaign.get('resourceName'):
                 raise Exception("Campaign resource name not found")
@@ -195,3 +202,32 @@ class AgentController:
             
         except Exception as e:
             return {"error": str(e)}, 400
+    @tokenRequired()
+    def saveAd(self):
+        try:
+            # Get request data
+            ad_data = request.get_json()
+            
+            if not ad_data:
+                return jsonify({'error': 'No ad data provided'}), 400
+                
+            try:
+                adReqVM=AdReqVM()
+                ad_data = adReqVM.load(ad_data)
+            except ValidationError as err:
+                return jsonify({'error': 'Bad Request', 'details': err.messages}), 400
+                
+            # Call service method to save ad
+            success = self.agentService.saveAd(ad_data)
+            
+            if success:
+                return jsonify({
+                    'message': 'Ad saved successfully'}), 201
+            else:
+                return jsonify({
+                    'error': 'Failed to save ad'
+                }), 400
+                
+        except Exception as e:
+            print(f"Error saving ad: {str(e)}")
+            return jsonify({'error': str(e)}), 500

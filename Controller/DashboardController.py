@@ -10,8 +10,8 @@ class DashboardController:
         self.setupRoutes()
         
     def setupRoutes(self):
-        self.dashboardBluePrint.route('/campaigns', methods=['GET'])(self.getCampaignMetrics)
-        self.dashboardBluePrint.route('/summary', methods=['GET'])(self.getSummaryMetrics)
+        self.dashboardBluePrint.route('/campaigns', methods=['POST'])(self.getCampaignMetrics)
+        self.dashboardBluePrint.route('/summary', methods=['POST'])(self.getSummaryMetrics)
 
     @tokenRequired()
     def getCampaignMetrics(self):

@@ -10,10 +10,10 @@ class DashboardService:
     def __init__(self, agentService):
         self.agentService = agentService  # For getting Google Ads client
         
-    def getCampaignMetrics(self, user_id: str) -> List[Dict]:
+    def getCampaignMetrics(self, user_id,customer_id):
         try:
             # Get all campaigns for user
-            campaigns = self.getUserCampaigns(user_id)
+            campaigns = self.getUserCampaigns(user_id,customer_id)
             if not campaigns:
                 return []
                 
@@ -34,7 +34,7 @@ class DashboardService:
                         # Fetch fresh metrics from Google Ads
                         fresh_metrics = self.fetchGoogleAdsMetrics(
                             user_id, 
-                            campaign['resourceName']
+                            campaign['resourceName'],customer_id
                         )
                         
                         # Store new metrics
@@ -55,23 +55,28 @@ class DashboardService:
             raise Exception(f"Error processing campaign {campaign['_id']}: {str(e)}")
                     
             
-    def getUserCampaigns(self, user_id: str):
-        return list(mongo.db.Campaigns.find({'userId': ObjectId(user_id)}))
+    def getUserCampaigns(self, user_id,customer_id):
+        return list(mongo.db.Campaigns.find({'userId': ObjectId(user_id),'customerId': customer_id}))
         
     def getStoredMetrics(self, campaign_id: ObjectId, since_date: datetime):
-    # Ensure since_date is at midnight for proper comparison
+        # Ensure since_date is at midnight for proper comparison
         since_date = since_date.replace(hour=0, minute=0, second=0, microsecond=0)
         
         metrics = mongo.db.PerformanceMetrics.find_one({
             'campaignId': campaign_id,
             'date': {'$gte': since_date}
         })
+        
         if metrics:
             return {
+                'cost': metrics['cost'],
+                'conversions': metrics['conversions'],
+                'impressions': metrics['impressions'],
                 'clicks': metrics['clicks'],
-                'event': metrics['event'],
-                'ctr': metrics['ctr'],
-                'conversions': metrics['conversions']
+                'avgCpc': metrics['avgCpc'],
+                'cpa': metrics['cpa'],
+                'interactionRate': metrics['interactionRate'],
+                'interactions': metrics['interactions']
             }
         return None
         
@@ -93,218 +98,197 @@ class DashboardService:
             upsert=True
         )
             
-    def fetchGoogleAdsMetrics(self, user_id: str, campaign_resource_name: str) -> Dict:
+    def fetchGoogleAdsMetrics(self, user_id, campaign_resource_name, customerId):
         max_retries = 3
         base_delay = 1  # seconds
         
         for attempt in range(max_retries):
             try:
-                client = self.agentService.getClient(user_id)
-                customer_id = self.agentService.getCustomerId(user_id)
+                client = self.agentService.getClient(user_id, customerId)
                 
                 ga_service = client.get_service("GoogleAdsService")
                 
                 query = """
                     SELECT 
                         campaign.id,
+                        metrics.cost_micros,
+                        metrics.conversions,
+                        metrics.impressions,
                         metrics.clicks,
-                        metrics.interactions,
-                        metrics.ctr,
-                        metrics.conversions
+                        metrics.average_cpc,
+                        metrics.cost_per_conversion,
+                        metrics.interaction_rate,
+                        metrics.interactions
                     FROM campaign
                     WHERE campaign.resource_name = '%s'
                     AND segments.date DURING LAST_7_DAYS
                 """ % campaign_resource_name
                 
                 response = ga_service.search(
-                    customer_id=customer_id,
+                    customer_id=customerId,
                     query=query
                 )
-                print('response is:', response)
+                
                 # Process the first row (should only be one)
                 for row in response:
                     return {
+                        'cost': row.metrics.cost_micros / 1_000_000,  # Convert micros to actual currency
+                        'conversions': row.metrics.conversions,
+                        'impressions': row.metrics.impressions,
                         'clicks': row.metrics.clicks,
-                        'event': row.metrics.interactions,
-                        'ctr': float(row.metrics.ctr),
-                        'conversions': row.metrics.conversions
+                        'avgCpc': row.metrics.average_cpc / 1_000_000,  # Convert micros to actual currency
+                        'cpa': row.metrics.cost_per_conversion / 1_000_000 if row.metrics.conversions > 0 else 0,
+                        'interactionRate': float(row.metrics.interaction_rate),
+                        'interactions': row.metrics.interactions
                     }
                     
-                return {
-                    'clicks': 0,
-                    'event': 0,
-                    'ctr': 0.0,
-                    'conversions': 0
-                }
+                # return {
+                #     'cost': 0.0,
+                #     'conversions': 0,
+                #     'impressions': 0,
+                #     'clicks': 0,
+                #     'avgCpc': 0.0,
+                #     'cpa': 0.0,
+                #     'interactionRate': 0.0,
+                #     'interactions': 0
+                # }
                 
             except GoogleAdsException as ex:
                 if attempt == max_retries - 1:
                     raise
-                    
                 delay = base_delay * (2 ** attempt)  # exponential backoff
                 time.sleep(delay)
                 continue
-    def getSummaryMetrics(self, user_id: str, start_date: datetime, end_date: datetime, compare: bool) -> Dict:
+
+    
+    def getSummaryMetrics(self, user_id: str, customer_id: str) -> dict:
         try:
-            # Check cache first
-            cached_metrics = self.getCachedSummary(user_id, start_date, end_date)
-            if cached_metrics:
-                return cached_metrics
+            # Convert user_id to ObjectId
+            userId = ObjectId(user_id)
             
-            # Get fresh metrics from Google Ads
-            client = self.agentService.getClient(user_id)
-            customer_id = self.agentService.getCustomerId(user_id)
+            # Get date ranges
+            today = datetime.now()
+            current_month_start = today.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+            last_month_end = current_month_start - timedelta(days=1)
+            last_month_start = last_month_end.replace(day=1)
             
-            # Get current period metrics
-            current_metrics = self.fetchGoogleAdsTotals(
-                client,
+            # Check if we have recent data in DB
+            stored_metrics = mongo.db.SummaryPerformanceMetrics.find_one({
+                'userId': userId,
+                'customerId': customer_id,
+                'updatedAt': {'$gte': current_month_start}
+            })
+            
+            if stored_metrics:
+                return {
+                    'currentMonth': stored_metrics['currentMonth'],
+                    'lastMonth': stored_metrics['lastMonth'],
+                    'changes': stored_metrics['changes']
+                }
+                
+            # If no recent data, fetch from Google Ads API
+            client = self.agentService.getClient(user_id, customer_id)
+            
+            # Fetch metrics for both months
+            current_metrics = self._fetchMonthMetrics(
+                client, 
                 customer_id,
-                start_date,
-                end_date
+                current_month_start,
+                today
             )
             
-            # Get comparison metrics if requested
-            deltas = {}
-            if compare:
-                period_length = (end_date - start_date).days
-                prior_end = start_date - timedelta(days=1)
-                prior_start = prior_end - timedelta(days=period_length)
-                
-                prior_metrics = self.fetchGoogleAdsTotals(
-                    client,
-                    customer_id,
-                    prior_start,
-                    prior_end
-                )
-                
-                # Calculate deltas
-                deltas = self.calculateDeltas(current_metrics, prior_metrics)
-            
-            # Get daily traffic data
-            daily_traffic = self.fetchDailyTraffic(
+            last_month_metrics = self._fetchMonthMetrics(
                 client,
                 customer_id,
-                start_date,
-                end_date
+                last_month_start,
+                last_month_end
             )
             
-            # Prepare result
-            result = {
-                'totals': current_metrics,
-                'deltas': deltas,
-                'dailyTraffic': daily_traffic
+            # Calculate changes
+            changes = self._calculatePercentageChanges(current_metrics, last_month_metrics)
+            
+            # Prepare summary
+            summary = {
+                'currentMonth': current_metrics,
+                'lastMonth': last_month_metrics,
+                'changes': changes
             }
             
-            # Cache the results
-            self.cacheSummaryMetrics(
-                user_id,
-                start_date,
-                end_date,
-                result
+            # Store in database
+            mongo.db.SummaryPerformanceMetrics.update_one(
+                {
+                    'userId': userId,
+                    'customerId': customer_id,
+                    'month': current_month_start
+                },
+                {
+                    '$set': {
+                        'currentMonth': current_metrics,
+                        'lastMonth': last_month_metrics,
+                        'changes': changes,
+                        'updatedAt': datetime.utcnow()
+                    }
+                },
+                upsert=True
             )
             
-            return result
+            return summary
             
         except Exception as e:
             print(f"Error getting summary metrics: {str(e)}")
             raise
-    
-    def getCachedSummary(self, user_id: str, start_date: datetime, end_date: datetime) -> Dict:
-        cache_ttl = datetime.utcnow() - timedelta(days=1)
-        
-        cached = mongo.db.SummaryPerformanceMetrics.find_one({
-            'userId': ObjectId(user_id),
-            'startDate': start_date,
-            'endDate': end_date,
-            'lastUpdated': {'$gte': cache_ttl}
-        })
-        
-        if cached:
-            return {
-                'totals': cached['totals'],
-                'deltas': cached.get('deltas', {}),
-                'dailyTraffic': cached['dailyTraffic']
+
+    def _fetchMonthMetrics(self, client, customer_id: str, start_date: datetime, end_date: datetime) -> dict:
+        try:
+            ga_service = client.get_service("GoogleAdsService")
+            
+            query = """
+                SELECT
+                    metrics.cost_micros,
+                    metrics.impressions,
+                    metrics.clicks,
+                    metrics.conversions,
+                    metrics.average_cpc,
+                    metrics.cost_per_conversion
+                FROM campaign
+                WHERE segments.date BETWEEN '%s' AND '%s'
+            """ % (start_date.strftime('%Y-%m-%d'), end_date.strftime('%Y-%m-%d'))
+            
+            response = ga_service.search(customer_id=customer_id, query=query)
+            
+            # Initialize metrics
+            metrics = {
+                'adSpend': 0.0,
+                'impressions': 0,
+                'clicks': 0,
+                'conversions': 0,
+                'averageCpc': 0.0,
+                'cpa': 0.0
             }
-        return None
-    
-    def cacheSummaryMetrics(self, user_id: str, start_date: datetime, end_date: datetime, metrics: Dict):
-        mongo.db.SummaryPerformanceMetrics.update_one(
-            {
-                'userId': ObjectId(user_id),
-                'startDate': start_date,
-                'endDate': end_date
-            },
-            {
-                '$set': {
-                    **metrics,
-                    'lastUpdated': datetime.utcnow()
-                }
-            },
-            upsert=True
-        )
-    
-    def fetchGoogleAdsTotals(self, client, customer_id: str, start_date: datetime, end_date: datetime) -> Dict:
-        ga_service = client.get_service("GoogleAdsService")
+            
+            # Aggregate metrics across all campaigns
+            for row in response:
+                metrics['adSpend'] += row.metrics.cost_micros / 1_000_000
+                metrics['impressions'] += row.metrics.impressions
+                metrics['clicks'] += row.metrics.clicks
+                metrics['conversions'] += row.metrics.conversions
+                metrics['averageCpc'] = row.metrics.average_cpc / 1_000_000
+                metrics['cpa'] = row.metrics.cost_per_conversion / 1_000_000 if row.metrics.conversions > 0 else 0
+                
+            return metrics
+            
+        except GoogleAdsException as ex:
+            print(f"Google Ads API error: {ex}")
+            raise
+
+    def _calculatePercentageChanges(self, current: dict, previous: dict) -> dict:
+        changes = {}
         
-        query = f"""
-            SELECT
-                metrics.cost_micros,
-                metrics.clicks,
-                metrics.conversions,
-                metrics.average_cpc,
-                metrics.cost_per_conversion
-            FROM campaign
-            WHERE segments.date BETWEEN '{start_date.strftime('%Y-%m-%d')}' 
-                AND '{end_date.strftime('%Y-%m-%d')}'
-        """
-        
-        response = ga_service.search(customer_id=customer_id, query=query)
-        
-        totals = {
-            'spend': 0.0,
-            'clicks': 0,
-            'conversions': 0,
-            'avgCpc': 0.0,
-            'cpa': 0.0
-        }
-        
-        for row in response:
-            totals['spend'] += row.metrics.cost_micros / 1_000_000
-            totals['clicks'] += row.metrics.clicks
-            totals['conversions'] += row.metrics.conversions
-            totals['avgCpc'] = row.metrics.average_cpc / 1_000_000
-            totals['cpa'] = row.metrics.cost_per_conversion / 1_000_000
-        
-        return totals
-    
-    def calculateDeltas(self, current: Dict, prior: Dict) -> Dict:
-        deltas = {}
-        for key in current.keys():
-            if prior[key] != 0:
-                deltas[key] = round((current[key] - prior[key]) / prior[key] * 100, 1)
+        for metric in current.keys():
+            if previous[metric] != 0:
+                percent_change = ((current[metric] - previous[metric]) / previous[metric]) * 100
+                changes[metric] = round(percent_change, 2)
             else:
-                deltas[key] = 100 if current[key] > 0 else 0
-        return deltas
-    
-    def fetchDailyTraffic(self, client, customer_id: str, start_date: datetime, end_date: datetime) -> List[Dict]:
-        ga_service = client.get_service("GoogleAdsService")
-        
-        query = f"""
-            SELECT
-                segments.date,
-                metrics.clicks
-            FROM campaign
-            WHERE segments.date BETWEEN '{start_date.strftime('%Y-%m-%d')}' 
-                AND '{end_date.strftime('%Y-%m-%d')}'
-        """
-        
-        response = ga_service.search(customer_id=customer_id, query=query)
-        
-        daily_traffic = []
-        for row in response:
-            daily_traffic.append({
-                'date': row.segments.date,
-                'clicks': row.metrics.clicks
-            })
-        
-        return sorted(daily_traffic, key=lambda x: x['date'])
+                changes[metric] = 100 if current[metric] > 0 else 0
+                
+        return changes

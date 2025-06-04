@@ -11,3 +11,7 @@ class BusinessCreateReqVM(Schema):
     sizeofCompany = fields.Str(required=True)
     # serviceAreas = fields.List(fields.Str(),required=False)
     # campaignId = fields.Str(required=True)
+    firstName = fields.Str(required=True)
+    lastName = fields.Str(required=True)
+    purpose = fields.Str(required=True)
+    userId = fields.Str(required=True)

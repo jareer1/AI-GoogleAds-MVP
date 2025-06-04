@@ -17,10 +17,12 @@ class DashboardController:
     def getCampaignMetrics(self):
         try:
             # Get userId from token (set by tokenRequired decorator)
-            user_id = request.userId
+            data=request.get_json()
+            user_id=data['userId']
+            customer_id=data['customerId']            
             
             # Get campaign metrics from service
-            metrics = self.dashboardService.getCampaignMetrics(user_id)
+            metrics = self.dashboardService.getCampaignMetrics(user_id,customer_id)
             
             return jsonify(metrics), 200
             
@@ -28,33 +30,17 @@ class DashboardController:
             print(f"Error fetching campaign metrics: {str(e)}")
             return jsonify({'error': str(e)}), 500
     @tokenRequired()
+    @tokenRequired()
     def getSummaryMetrics(self):
         try:
-            # Get userId from token
-            user_id = request.userId
+            data = request.get_json()
+            user_id = data['userId']
+            customer_id = data['customerId']
             
-            # Parse query parameters with defaults
-            try:
-                start_date = datetime.strptime(
-                    request.args.get('startDate', (datetime.utcnow() - timedelta(days=30)).strftime('%Y-%m-%d')),
-                    '%Y-%m-%d'
-                )
-                end_date = datetime.strptime(
-                    request.args.get('endDate', datetime.utcnow().strftime('%Y-%m-%d')),
-                    '%Y-%m-%d'
-                )
-                compare = request.args.get('compare', 'true').lower() == 'true'
-            except ValueError as e:
-                return jsonify({'error': 'Invalid date format. Use YYYY-MM-DD'}), 400
+            # Get metrics from service
+            summary_metrics = self.dashboardService.getSummaryMetrics(user_id, customer_id)
             
-            metrics = self.dashboardService.getSummaryMetrics(
-                user_id,
-                start_date,
-                end_date,
-                compare
-            )
-            
-            return jsonify(metrics), 200
+            return jsonify(summary_metrics), 200
             
         except Exception as e:
             print(f"Error fetching summary metrics: {str(e)}")

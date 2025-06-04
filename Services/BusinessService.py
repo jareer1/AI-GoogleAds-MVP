@@ -10,10 +10,7 @@ class BusinessService:
             business_data['createdAt'] = datetime.utcnow()
             business_data['updatedAt'] = datetime.utcnow()
             
-            # Set default values for optional fields
-            business_data.setdefault('secondaryCategories', [])
-            business_data.setdefault('serviceAreas', [])
-            business_data['campaignId'] = ObjectId(business_data['campaignId'])
+            business_data['userId'] = ObjectId(business_data['userId'])
 
             # Insert into database
             result = mongo.db.Business.insert_one(business_data)

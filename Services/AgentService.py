@@ -34,56 +34,46 @@ class AgentService:
  
 
         self.prompt = ChatPromptTemplate.from_messages([
-            SystemMessagePromptTemplate.from_template(
-                """
-        You are a Google Ads keyword generation expert. Follow these strict rules:
-        1. Respond ONLY with a list of keywords, one per line—no numbering, bullet points, or punctuation.
-        2. Use only terms directly supported by the provided Business and Campaign Information.
-        3. Do NOT invent products, features, or services not mentioned in the inputs.
-        4. If the information is insufficient to generate any keywords, respond with EXACTLY:
-        INSUFFICIENT_INFO
-        5. Ensure all keywords are relevant to Google Ads best practices (e.g., use plausible search terms customers might use).
-        """
-            ),
+        SystemMessagePromptTemplate.from_template(
+            """
+You are a Google Ads keyword generation expert. Follow these strict rules:
 
-            # Few-shot example to guide the model
-            HumanMessagePromptTemplate.from_template(
-                """
-        Example:
-        Business Information:
-        A local bakery specializing in gluten-free pastries and artisan breads.
+1. Generate EXACTLY 10-20 highly relevant keywords
+2. Focus on keywords with highest commercial intent and relevance
+3. Respond with ONLY the keywords - one per line, no additional text
+4. Consider match types and intent:
+   - For SEARCH_STANDARD: Focus on purchase-intent keywords
+   - For DISPLAY_STANDARD: Focus on interest-based keywords
+5. Prioritize keywords based on:
+   - Direct relevance to business offerings
+   - Commercial/transactional intent
+   - Search volume potential
+   - CPC bid alignment
+6. Format rules:
+   - One keyword per line
+   - No numbering, bullets, or punctuation
+   - No commentary or additional text
+7. If insufficient information, respond with exactly:
+   INSUFFICIENT_INFO
 
-        Campaign Information:
-        Launch campaign for new morning muffin selection featuring banana and blueberry.
+Remember: Quality over quantity - each keyword must be highly targeted and valuable.
+            """
+        ),
+        HumanMessagePromptTemplate.from_template(
+            """
+Business Information:
+{business_info}
 
-        Generate relevant keyword ideas:
-        """
-            ),
-            AIMessagePromptTemplate.from_template(
-                """
-        gluten-free banana muffins
-        gluten-free blueberry muffins
-        artisan banana muffins
-        artisan blueberry muffins
-        morning gluten-free pastries
-        gluten-free breakfast muffins
-        """
-            ),
+Campaign Information:
+{campaign_info}
 
-            # Actual user input
-            HumanMessagePromptTemplate.from_template(
-                """
-        Business Information:
-        {business_info}
+Ad Group Information:
+{ad_group_info}
 
-        Campaign Information:
-        {campaign_info}
-
-        Generate relevant keyword ideas:
-        """
-            )
-        ])
-
+Generate 10-20 highly relevant keywords:
+            """
+        )
+    ])
 
         self.chain = LLMChain(llm=self.chat_llm, prompt=self.prompt)
 
@@ -92,15 +82,15 @@ class AgentService:
 
     def getBusiness(self, userId):
         return mongo.db.Business.find_one({'userId': ObjectId(userId)})
-    def getAdGroupIdByCampaignId(self, campaignId):
-        ad_group = mongo.db.AdGroup.find_one({'campaignId': ObjectId(campaignId)})
+    def getAdGroupByAdGroupId(self, adGroupId):
+        ad_group = mongo.db.AdGroup.find_one({'_id': ObjectId(adGroupId)})
         if not ad_group:
             raise Exception("No ad group found for this campaign")
-        return str(ad_group['_id'])
+        return ad_group
     def getKeywords(self, campaign, business,adGroupId,checkWebsite,keywords):
         try:
+            adGroupDetails=self.getAdGroupByAdGroupId(adGroupId)
             dataforSEO_keywords = self.get_dataforseo_keywords(business, campaign,checkWebsite,keywords)
-            print('dataforSEO_keywords:', dataforSEO_keywords)
             business_info = (
                 f"Business Name: {business['businessName']}\n"
                 f"Category: {business['mainCategory']}\n"
@@ -109,10 +99,16 @@ class AgentService:
             campaign_info = (
                 f"Target Audience: {campaign.get('targetAudience', 'Not specified')}"
             )
-
+            ad_group_info = (
+            f"Ad Group Name: {adGroupDetails['name']}\n"
+            f"Ad Group Type: {adGroupDetails['type']}\n"
+            f"CPC Bid: ${adGroupDetails['cpcBidMicros']/1000000:.2f}"
+            )
             result = self.chain.invoke({
                 'business_info': business_info,
-                'campaign_info': campaign_info
+                'campaign_info': campaign_info,
+                'ad_group_info': ad_group_info
+
             })
             
             # Extract keywords from LLM response
@@ -122,7 +118,6 @@ class AgentService:
                 keywords_text = result.content
                 
             llm_keywords = [kw.strip() for kw in keywords_text.splitlines() if kw.strip()]
-            
             # Get insights for the generated keywords
             keyword_insights = self.get_keyword_insights(
                 keywords=llm_keywords,
@@ -158,9 +153,24 @@ class AgentService:
         ad_group = mongo.db.AdGroup.find_one({'_id': ObjectId(adGroupId)})
         return ad_group.get('keywords') if ad_group else None
 
+    def getAdGroupIdByCampaignId(self, campaignId):
+        try:
+            # Find all ad groups for the campaign
+            ad_groups = mongo.db.AdGroup.find({'campaignId': ObjectId(campaignId),'status': 'PENDING'})
+            
+            # Convert cursor to list of ad group IDs as strings
+            ad_group_ids = [str(ad_group['_id']) for ad_group in ad_groups]
+            
+            if not ad_group_ids:
+                raise Exception("No ad groups found for this campaign")
+                
+            return ad_group_ids
 
+        except Exception as e:
+            print(f"Error getting ad group IDs: {str(e)}")
+            raise
 
-    def getAd(self, campaign, business, keywords):
+    def getAd(self, campaign, business, keywords,adGroupId):
         business_info = (
             f"Business Name: {business['businessName']}\n"
             f"Category: {business['mainCategory']}\n"
@@ -176,7 +186,7 @@ class AgentService:
                 keyword_strings.append(f"{k['keyword']}")
 
         keywords_info = "Keywords:\n" + "\n".join(keyword_strings)
-
+        ad_group_info = self.getAdGroupByAdGroupId(adGroupId)
         prompt = ChatPromptTemplate.from_messages([
             SystemMessagePromptTemplate.from_template("""
     You are an expert Google Ads copywriter. Generate a complete ad package in JSON format.
@@ -214,7 +224,10 @@ class AgentService:
 
     Campaign Information:
     {campaign_info}
-
+    
+    AdGroup Information:
+    {ad_group_info}                                                 
+                                                     
     Target Keywords:
     {keywords_info}
             """)
@@ -224,9 +237,9 @@ class AgentService:
         result = ad_chain.invoke({
             'business_info': business_info,
             'campaign_info': campaign_info,
-            'keywords_info': keywords_info
+            'keywords_info': keywords_info,
+            'ad_group_info': ad_group_info,
         })
-        print("LLM Response:", result)
 
         # Parse the LLM’s JSON output
         if isinstance(result, dict) and 'text' in result:
@@ -249,12 +262,11 @@ class AgentService:
 
         return ad_document, True
 
-    def saveAd(self, adDocument):
+    def saveAd(self, adDocument,campaignId):
         try:
             # Convert campaignId from string to ObjectId
-            if 'campaignId' in adDocument and isinstance(adDocument['campaignId'], str):
-                adDocument['campaignId'] = ObjectId(adDocument['campaignId'])
-                
+            adDocument['campaignId'] = ObjectId(campaignId)
+            adDocument['adGroupId'] = ObjectId(adDocument.get('adGroupId', ''))  # Ensure adGroupId is ObjectId
             # Set timestamps
             adDocument['createdAt'] = datetime.utcnow()
             adDocument['status'] = 'active'
@@ -284,7 +296,6 @@ class AgentService:
             if not user.get('refresh_token'):
                 raise Exception("User missing required Google Ads credentials")
 
-            print(f"Creating client for user: {user['email']}")
             
             # Build Google Ads client config - ensure all values are strings
             client_config = {
@@ -296,9 +307,7 @@ class AgentService:
                 "use_proto_plus": True
             }
             
-            print("Initializing Google Ads client with config:", client_config)
             client = GoogleAdsClient.load_from_dict(client_config)
-            print("Google Ads client created successfully")
             
             return client
 
@@ -347,7 +356,6 @@ class AgentService:
             if checkWebsite:
                 website = business.get("websiteUrl", "").strip()
                 if not website:
-                    print("No website URL found in business data")
                     return []
                 
                 post_data = [{
@@ -361,7 +369,6 @@ class AgentService:
 
             else:
                 if not keywords:
-                    print("No keywords provided for keyword-based lookup")
                     return []
                 
                 post_data = [{
@@ -377,7 +384,6 @@ class AgentService:
             response = client.post(endpoint, post_data)
             tasks = response.get("tasks", [])
             if not tasks:
-                print("No tasks returned from DataForSEO")
                 return []
             
             results = tasks[0].get("result", [])
@@ -412,7 +418,6 @@ class AgentService:
                     "language_name": "English"
                 }
             ]
-            print(f"Fetching keyword insights for {len(keywords)} keywords in {location}")
 
             # Make API call
             response = client.post("/v3/dataforseo_labs/google/keyword_overview/live", post_data)
@@ -435,7 +440,6 @@ class AgentService:
                         }
                         keyword_insights.append(insight)
             
-            print(f"Retrieved insights for {len(keyword_insights)} keywords")
             return keyword_insights
 
         except Exception as e:
@@ -467,7 +471,6 @@ class AgentService:
                     }
                 }
             )
-            print('budget created successfuly')
             return budget_resource_name
             
         except Exception as e:
@@ -505,7 +508,6 @@ class AgentService:
                 }
             )
 
-            print(f"Campaign enabled successfully: {campaign['resourceName']}")
             return response
 
         except Exception as e:
@@ -536,7 +538,6 @@ class AgentService:
             new_campaign.target_spend = client.get_type("TargetSpend")
             new_campaign.target_spend.cpc_bid_ceiling_micros = 10000000  # $1.00 max CPC
 
-            print(f"Creating campaign for customer ID: {customer_id}")
             response = campaign_service.mutate_campaigns(
                 customer_id=customer_id,
                 operations=[operation]
@@ -556,7 +557,6 @@ class AgentService:
                 }
             )
             
-            print(f"Campaign created with resource name: {campaign_resource_name}")
             return campaign_resource_name
             
         except Exception as e:
@@ -578,17 +578,15 @@ class AgentService:
         except Exception as e:
             print(f"Error storing ad group: {str(e)}")
             raise
-    def createAdGroup(self, client, customer_id, campaign_resource_name, campaignId):
+    def createAdGroup(self, client, customer_id, campaign_resource_name, campaignId,adGroupId):
         try:
             # Get stored ad group details
+            
             ad_group_data = mongo.db.AdGroup.find_one({
-                'campaignId': ObjectId(campaignId),
+                '_id': ObjectId(adGroupId),
                 'status': 'PENDING'
             })
             
-            if not ad_group_data:
-                raise Exception("No pending ad group found for this campaign")
-
             # 1. Create the ad group first
             ad_group_service = client.get_service("AdGroupService")            
             operation = client.get_type("AdGroupOperation")
@@ -661,12 +659,11 @@ class AgentService:
             # Update status to FAILED if there's an error
             print(f"Error creating ad group: {str(e)}")
             raise
-    def createResponsiveSearchAds(self, client, customer_id, ad_group_resource_name, campaignId,user_id):
+    def createResponsiveSearchAds(self, client, customer_id, ad_group_resource_name,user_id,adGroupId):
         try:
-            ads = self.getAdsByCampaignId(campaignId)
+            ads = self.getAdsByAdGroupId(adGroupId)
             if not ads:
                 raise Exception("No unpublished ads found for this campaign")
-
             ad_service = client.get_service("AdGroupAdService")
             created_ads = []
             business=self.getBusiness(userId=user_id)
@@ -684,7 +681,6 @@ class AgentService:
                 ad_group_ad = operation.create
                 ad_group_ad.ad_group = ad_group_resource_name
                 ad = client.get_type("Ad")
-
                 # Process headlines - ensure they meet length requirements
                 headlines = []
                 for headline in ad_content['headlines'][:15]:  # Max 15 headlines
@@ -697,7 +693,6 @@ class AgentService:
                     headline_asset = client.get_type("AdTextAsset")
                     headline_asset.text = cleaned_headline
                     ad.responsive_search_ad.headlines.append(headline_asset)
-
                 # Process descriptions - ensure they meet length requirements
                 descriptions = []
                 for description in ad_content['descriptions'][:4]:  # Max 4 descriptions
@@ -709,16 +704,10 @@ class AgentService:
                     desc_asset = client.get_type("AdTextAsset")
                     desc_asset.text = cleaned_desc
                     ad.responsive_search_ad.descriptions.append(desc_asset)
-
                 # Set final URL
                 ad.final_urls.append(display_url)
                 ad_group_ad.ad = ad
 
-                # Debug logging
-                print(f"Creating ad with:")
-                print(f"- URL: {display_url}")
-                print(f"- Headlines: {headlines}")
-                print(f"- Description lengths: {[len(d) for d in descriptions]}")
 
                 # Execute request
                 response = ad_service.mutate_ad_group_ads(
@@ -749,10 +738,10 @@ class AgentService:
             print(f"Error creating responsive search ads: {str(e)}")
             raise
     
-    def getAdsByCampaignId(self, campaignId):
+    def getAdsByAdGroupId(self, adGroupId):
         try:
             ads = mongo.db.Ads.find({
-                'campaignId': ObjectId(campaignId),
+                'adGroupId': ObjectId(adGroupId),
                 'status': 'active',
                 'published': {'$ne': True}  # Only get unpublished ads
             })
@@ -793,7 +782,6 @@ class AgentService:
                 }
             )
 
-            print(f"Campaign disabled successfully: {campaign['resourceName']}")
             return response
 
         except Exception as e:

@@ -1,7 +1,24 @@
 from bson import ObjectId
-from ..database import mongo
-from flask import request, jsonify
 from datetime import datetime
+from ..database import mongo
+from langchain.prompts import ChatPromptTemplate, HumanMessagePromptTemplate, SystemMessagePromptTemplate
+from langchain.chains import LLMChain
+from bson import ObjectId
+from ..config import AzureDeploymentName, AzureOpenAiVersion, AzureOpenAiKey, AzureOpenAiEndpoint
+from  langchain_openai import AzureChatOpenAI
+import json
+from google.ads.googleads.client import GoogleAdsClient
+from ..config import GOOGLE_ADS_DEVELOPER_TOKEN, GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET
+from google.protobuf import field_mask_pb2
+from langchain.prompts import (
+    ChatPromptTemplate,
+    SystemMessagePromptTemplate,
+    HumanMessagePromptTemplate,
+    AIMessagePromptTemplate
+)
+from .client import RestClient
+import time
+
 
 class CampaignService:
     def check_duplicate_campaign_name(self, user_id: str, campaign_name: str, exclude_campaign_id: str = None) -> bool:
@@ -48,16 +65,118 @@ class CampaignService:
 
             # Insert into MongoDB
             result = mongo.db.Campaigns.insert_one(campaign_data)
+            adGroups=self.createAdGroup(campaign_data)
+
 
             return {
                 'message': 'Campaign created successfully',
-                'campaignId': str(result.inserted_id)
+                'campaignId': str(result.inserted_id),
+                'adGroups': adGroups['adGroups'] if 'adGroups' in adGroups else []
             }, 201
 
         except Exception as e:
             print(f"Error creating campaign: {str(e)}")
             return {'error': str(e)}, 500
+    def createAdGroup(self, campaignData):
+        try:
+            # Initialize LLM
+            chat_llm = AzureChatOpenAI(
+                deployment_name=AzureDeploymentName,
+                openai_api_version=AzureOpenAiVersion,
+                openai_api_key=AzureOpenAiKey,
+                azure_endpoint=AzureOpenAiEndpoint,
+                temperature=0.0,
+            )
 
+            # Create prompt template
+            prompt = ChatPromptTemplate.from_messages([
+    SystemMessagePromptTemplate.from_template("""
+You are a Google Ads expert. Based on the campaign data, create ad groups in this exact JSON format:
+{{
+    "adGroups": [
+        {{
+            "name": "Example Ad Group",
+            "type": "SEARCH_STANDARD",
+            "cpcBidMicros": 2000000
+        }}
+    ]
+}}
+
+Rules:
+1. Return ONLY the JSON object - no additional text or formatting
+2. Each ad group must have exactly these fields: name, type, cpcBidMicros
+3. type must be "SEARCH_STANDARD""
+4. cpcBidMicros should be reasonable based on campaign budget (1 USD = 1,000,000 micros)
+5. Create 2-5 ad groups based on campaign scope
+"""),
+    HumanMessagePromptTemplate.from_template("""
+Campaign Details:
+Name: {campaignName}
+Focus: {conversionFocus}
+Budget: ${budget}
+Location: {location}
+Objectives: {objectives}
+""")
+])
+
+
+            # Invoke LLM
+            ad_group_chain = LLMChain(llm=chat_llm, prompt=prompt)
+            result = ad_group_chain.invoke({
+                'campaignName': campaignData['campaignName'],
+                'conversionFocus': campaignData.get('conversionFocus', ''),
+                'budget': campaignData.get('budget', 0),
+                'location': campaignData.get('location', ''),
+                'objectives': campaignData.get('objectives', '')
+            })
+
+            # Parse LLM response
+            try:
+                if isinstance(result, dict) and 'text' in result:
+                    # Clean up the response text
+                    json_str = result['text'].strip()
+                    if json_str.startswith('```json'):
+                        json_str = json_str[7:-3]  # Remove ```json and ``` markers
+                    ad_groups_data = json.loads(json_str)
+                else:
+                    ad_groups_data = json.loads(result.content)
+
+                if 'adGroups' not in ad_groups_data:
+                    raise ValueError("LLM response missing 'adGroups' key")
+
+                # Store ad groups in MongoDB
+                stored_ad_groups = []
+                for ad_group in ad_groups_data['adGroups']:
+                    ad_group_document = {
+                        'name': ad_group['name'],
+                        'type': ad_group['type'],
+                        'cpcBidMicros': ad_group['cpcBidMicros'],
+                        'campaignId': campaignData['_id'],  # Already an ObjectId from create()
+                        'status': 'PENDING',
+                        'createdAt': datetime.utcnow(),
+                        'updatedAt': datetime.utcnow()
+                    }
+                    
+                    result = mongo.db.AdGroup.insert_one(ad_group_document)
+                    stored_ad_groups.append(
+                        str(result.inserted_id),
+                    )
+
+                return {
+                    'adGroups': stored_ad_groups
+                }
+
+            except json.JSONDecodeError as e:
+                print(f"Error parsing LLM response: {str(e)}")
+                print(f"Raw response: {result}")
+                raise ValueError("Invalid JSON response from LLM")
+            except KeyError as e:
+                print(f"Missing required field in response: {str(e)}")
+                raise ValueError(f"Missing required field in LLM response: {str(e)}")
+
+        except Exception as e:
+            print(f"Error creating ad groups: {str(e)}")
+            return {'error': str(e)}, 500
     def update(self, campaign_id: str, campaign_data: dict) -> tuple[str, bool]:
         """Update an existing campaign"""
         try:

@@ -10,8 +10,8 @@ AzureOpenAiKey = "3sXbp2pMR6wgu0hCGxQHoxB4uADGpGtYBycbYH30jswvjBaFcvoLJQQJ99AKAC
 AzureOpenAiVersion = "2024-08-01-preview"
 AzureDeploymentName='cognidata-gpt-4o'    
 GOOGLE_ADS_DEVELOPER_TOKEN= "s4qUCowkrWMdtTA9-tkxSA"
-GOOGLE_CLIENT_ID="310654508589-d1vm4tkv14rs3i0doh594r7209tgmc93.apps.googleusercontent.com",
-GOOGLE_CLIENT_SECRET="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"
+GOOGLE_CLIENT_ID="374753783969-gp3sda4usauavgafm60ouiai4hnpl8al.apps.googleusercontent.com",
+GOOGLE_CLIENT_SECRET="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"
 env='dev'
 if env=='dev':
     frontendUrl = "http://localhost:3000/dashboard/google-ads-callback"

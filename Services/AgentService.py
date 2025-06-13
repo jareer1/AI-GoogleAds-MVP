@@ -174,8 +174,6 @@ Generate 10-20 highly relevant keywords:
         business_info = (
             f"Business Name: {business['businessName']}\n"
             f"Category: {business['mainCategory']}\n"
-            f"Secondary Categories: {', '.join(business['secondaryCategories'])}\n"
-            f"Service Areas: {', '.join(business['serviceAreas'])}"
         )
         campaign_info = (
             f"Target Audience: {campaign.get('targetAudience', 'Not specified')}"

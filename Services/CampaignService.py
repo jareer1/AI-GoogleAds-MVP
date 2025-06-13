@@ -77,6 +77,7 @@ class CampaignService:
         except Exception as e:
             print(f"Error creating campaign: {str(e)}")
             return {'error': str(e)}, 500
+        
     def createAdGroup(self, campaignData):
         try:
             # Initialize LLM
@@ -248,4 +249,56 @@ Objectives: {objectives}
 
         except Exception as e:
             print(f"Error deleting campaign: {str(e)}")
+            raise
+
+    def reviewCampaign(self, campaign_id: str, ad_group_ids: list) -> dict:
+        try:
+            # Get campaign details
+            campaign = mongo.db.Campaigns.find_one(
+                {'_id': ObjectId(campaign_id)},
+                {'campaignName': 1}
+            )
+            
+            if not campaign:
+                return None
+
+            # Get ad groups with their keywords
+            ad_groups = []
+            for ad_group_id in ad_group_ids:
+                # Get ad group details
+                ad_group = mongo.db.AdGroup.find_one(
+                    {'_id': ObjectId(ad_group_id)},
+                    {'name': 1, 'keywords': 1}
+                )
+                
+                if ad_group:
+                    # Get ads for this ad group
+                    ads = list(mongo.db.Ads.find(
+                        {'adGroupId': ObjectId(ad_group_id)},
+                        {
+                            'headlines': 1,
+                            'descriptions': 1
+                        }
+                    ))
+                    
+                    ad_groups.append({
+                        'adGroupId': str(ad_group['_id']),
+                        'name': ad_group['name'],
+                        'ads': [{
+                            'headlines': ad['headlines'],
+                            'descriptions': ad['descriptions'],
+                            'keywords': ad_group.get('keywords'),
+
+                        } for ad in ads]
+                    })
+
+            # Construct response
+            return {
+                'campaignId': str(campaign['_id']),
+                'campaignName': campaign['campaignName'],
+                'adGroups': ad_groups
+            }
+
+        except Exception as e:
+            print(f"Error in reviewCampaign service: {str(e)}")
             raise

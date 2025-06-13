@@ -14,6 +14,7 @@ class CampaignController:
         self.campaignBluePrint.route('/<campaign_id>', methods=['GET'])(self.getCampaign)
         self.campaignBluePrint.route('/<campaign_id>', methods=['DELETE'])(self.deleteCampaign)
         self.campaignBluePrint.route('/all/<user_id>', methods=['GET'])(self.getAllCampaigns)
+        self.campaignBluePrint.route('/review/<campaign_id>', methods=['PUT'])(self.reviewCampaign)
     
     @tokenRequired()
     def create(self):
@@ -109,4 +110,28 @@ class CampaignController:
 
         except Exception as e:
             print(f"Error deleting campaign: {str(e)}")
+            return jsonify({'error': str(e)}), 500
+
+
+    @tokenRequired()
+    def reviewCampaign(self, campaign_id):
+        try:
+            # Get ad group IDs from request body
+            data = request.get_json()
+            if not data or 'adGroupIds' not in data:
+                return jsonify({'error': 'Ad group IDs are required'}), 400
+
+            # Call service method
+            campaign_review = self.campaignService.reviewCampaign(
+                campaign_id=campaign_id,
+                ad_group_ids=data['adGroupIds']
+            )
+            
+            if not campaign_review:
+                return jsonify({'error': 'Campaign not found'}), 404
+
+            return jsonify(campaign_review), 200
+
+        except Exception as e:
+            print(f"Error reviewing campaign: {str(e)}")
             return jsonify({'error': str(e)}), 500

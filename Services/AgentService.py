@@ -603,27 +603,27 @@ Generate 10-20 highly relevant keywords:
             )
             
             ad_group_resource_name = response.results[0].resource_name
-
+            print('adGroup data is ',ad_group_data)
             # 2. Create keywords if they exist in the ad group
-            if 'keywords' in ad_group_data and ad_group_data['keywords']:
+            if 'keywords' in ad_group_data:
                 ad_group_criterion_service = client.get_service("AdGroupCriterionService")
                 keyword_operations = []
 
                 # Extract keyword text from keyword objects
                 for keyword_obj in ad_group_data['keywords']:
-                    if isinstance(keyword_obj, dict) and 'keyword' in keyword_obj:
-                        operation = client.get_type("AdGroupCriterionOperation")
-                        criterion = operation.create
-                        criterion.ad_group = ad_group_resource_name
-                        criterion.keyword.text = keyword_obj['keyword']  # Get keyword text from object
-                        criterion.keyword.match_type = client.enums.KeywordMatchTypeEnum.BROAD
-                        keyword_operations.append(operation)
+            
+                    operation = client.get_type("AdGroupCriterionOperation")
+                    criterion = operation.create
+                    criterion.ad_group = ad_group_resource_name
+                    criterion.keyword.text = keyword_obj  # Get keyword text from object
+                    criterion.keyword.match_type = client.enums.KeywordMatchTypeEnum.BROAD
+                    keyword_operations.append(operation)
                     if keyword_operations:
-                        keyword_response = ad_group_criterion_service.mutate_ad_group_criteria(
-                            customer_id=customer_id,
-                            operations=keyword_operations
-                    )
-                    
+                            keyword_response = ad_group_criterion_service.mutate_ad_group_criteria(
+                                customer_id=customer_id,
+                                operations=keyword_operations
+                        )
+                        
                     # Store keyword resource names
                     keyword_resource_names = [result.resource_name for result in keyword_response.results]
                     

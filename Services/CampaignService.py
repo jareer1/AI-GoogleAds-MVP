@@ -52,7 +52,7 @@ class CampaignService:
             # Convert string dates to datetime objects
             campaign_data['startDate'] = datetime.strptime(campaign_data['startDate'], '%Y-%m-%d')
             campaign_data['endDate'] = datetime.strptime(campaign_data['endDate'], '%Y-%m-%d')
-
+            campaign_data['budget'] =campaign_data['budget']*1000000 # Ensure budget is a float
             # Convert userId string to ObjectId
             campaign_data['userId'] = ObjectId(campaign_data['userId'])
 
@@ -104,11 +104,11 @@ You are a Google Ads expert. Based on the campaign data, create ad groups in thi
 }}
 
 Rules:
-1. Return ONLY the JSON object - no additional text or formatting
-2. Each ad group must have exactly these fields: name, type, cpcBidMicros
-3. type must be "SEARCH_STANDARD""
-4. cpcBidMicros should be reasonable based on campaign budget (1 USD = 1,000,000 micros)
-5. Create 2-5 ad groups based on campaign scope
+1. Return ONLY the JSON object—no additional text or formatting.
+2. Each ad group must have exactly these fields: name, type, cpcBidMicros.
+3. type must be "SEARCH_STANDARD".
+4. cpcBidMicros must be a multiple of 1,000,000 (i.e., whole-dollar bids) and between 1,000,000 (USD 1) and 10,000,000 (USD 10).
+5. Create 2–5 ad groups based on campaign scope.
 """),
     HumanMessagePromptTemplate.from_template("""
 Campaign Details:
@@ -119,8 +119,6 @@ Location: {location}
 Objectives: {objectives}
 """)
 ])
-
-
             # Invoke LLM
             ad_group_chain = LLMChain(llm=chat_llm, prompt=prompt)
             result = ad_group_chain.invoke({
@@ -151,6 +149,7 @@ Objectives: {objectives}
                     ad_group_document = {
                         'name': ad_group['name'],
                         'type': ad_group['type'],
+                        'cpcBidMicros': ad_group['cpcBidMicros'],
                         'cpcBidMicros': ad_group['cpcBidMicros'],
                         'campaignId': campaignData['_id'],  # Already an ObjectId from create()
                         'status': 'PENDING',

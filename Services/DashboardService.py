@@ -16,45 +16,55 @@ class DashboardService:
             campaigns = self.getUserCampaigns(user_id,customer_id)
             if not campaigns:
                 return []
-                
             metrics = []
             yesterday = datetime.utcnow() - timedelta(days=1)
-            
+
             for campaign in campaigns:
-                    # Check for existing metrics
-                    stored_metrics = self.getStoredMetrics(campaign['_id'], yesterday)
-                    
-                    if stored_metrics:
-                        metrics.append({
-                            'campaignId': str(campaign['_id']),
-                            'campaignName': campaign['campaignName'],
-                            **stored_metrics
-                        })
-                    else:
-                        # Fetch fresh metrics from Google Ads
-                        fresh_metrics = self.fetchGoogleAdsMetrics(
-                            user_id, 
-                            campaign['resourceName'],customer_id
-                        )
-                        
-                        # Store new metrics
-                        self.storeMetrics(campaign['_id'], fresh_metrics)
-                        
-                        metrics.append({
-                            'campaignId': str(campaign['_id']),
-                            'campaignName': campaign['campaignName'],
-                            'status': campaign['status'],
-                            **fresh_metrics
-                        })
-                        
-                
-                    
+                # Always include status in the response
+                base_response = {
+                    'campaignId': str(campaign['_id']),
+                    'campaignName': campaign['campaignName'],
+                    'status': campaign.get('status', 'UNKNOWN')
+                }
+
+                # If resourceName does not exist, return zeroed metrics
+                if 'resourceName' not in campaign or not campaign['resourceName']:
+                    zero_metrics = {
+                        'cost': 0.0,
+                        'conversions': 0,
+                        'impressions': 0,
+                        'clicks': 0,
+                        'avgCpc': 0.0,
+                        'cpa': 0.0,
+                        'interactionRate': 0.0,
+                        'interactions': 0
+                    }
+                    metrics.append({**base_response, **zero_metrics})
+                    continue
+
+                # Check for existing metrics
+                stored_metrics = self.getStoredMetrics(campaign['_id'], yesterday)
+
+                if stored_metrics:
+                    metrics.append({**base_response, **stored_metrics})
+                else:
+                    # Fetch fresh metrics from Google Ads
+                    fresh_metrics = self.fetchGoogleAdsMetrics(
+                        user_id,
+                        campaign['resourceName'],
+                        customer_id
+                    )
+
+                    # Store new metrics
+                    self.storeMetrics(campaign['_id'], fresh_metrics)
+
+                    metrics.append({**base_response, **fresh_metrics})
+
             return metrics
-            
+
         except Exception as e:
-            print(f"Error processing campaign {campaign['_id']}: {str(e)}")
-            raise Exception(f"Error processing campaign {campaign['_id']}: {str(e)}")
-                    
+            print(f"Error processing campaign: {str(e)}")
+            raise Exception(f"Error processing campaign: {str(e)}")                    
             
     def getUserCampaigns(self, user_id,customer_id):
         return list(mongo.db.Campaigns.find({'userId': ObjectId(user_id),'customerId': customer_id}))

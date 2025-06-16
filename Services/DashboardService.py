@@ -43,6 +43,7 @@ class DashboardService:
                         metrics.append({
                             'campaignId': str(campaign['_id']),
                             'campaignName': campaign['campaignName'],
+                            'status': campaign['status'],
                             **fresh_metrics
                         })
                         

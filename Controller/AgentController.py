@@ -68,13 +68,15 @@ class AgentController:
 
             # Process each ad group and collect keywords
             keywords_by_group = []
+            website = data.get('website', None)
             for adGroupId in data['adGroupIds']:
                 keywords, success = self.agentService.getKeywords(
                     campaign=campaign,
                     business=business,
                     adGroupId=adGroupId,
                     checkWebsite=data['checkWebsite'],
-                    keywords=data['keywords']
+                    keywords=data['keywords'],
+                    website=website,
                 )
                 
                 if success:

@@ -87,10 +87,10 @@ Generate 10-20 highly relevant keywords:
         if not ad_group:
             raise Exception("No ad group found for this campaign")
         return ad_group
-    def getKeywords(self, campaign, business,adGroupId,checkWebsite,keywords):
+    def getKeywords(self, campaign, business,adGroupId,checkWebsite,keywords,website):
         try:
             adGroupDetails=self.getAdGroupByAdGroupId(adGroupId)
-            dataforSEO_keywords = self.get_dataforseo_keywords(business, campaign,checkWebsite,keywords)
+            dataforSEO_keywords = self.get_dataforseo_keywords(business, campaign,checkWebsite,keywords,website)
             business_info = (
                 f"Business Name: {business['businessName']}\n"
                 f"Category: {business['mainCategory']}\n"
@@ -192,7 +192,6 @@ Generate 10-20 highly relevant keywords:
     - 5 headlines (max 30 chars each)
     - 5 descriptions (max 90 chars each)
     - 3 callouts (max 25 chars each)
-    - 3 sitelinks (max 25 chars text, 35 chars descriptions)
 
     Example format:
     {{
@@ -202,14 +201,6 @@ Generate 10-20 highly relevant keywords:
             {{
                 "text": "Callout text",
                 "schedule": {{ "day_of_week": "MONDAY", "start_hour": 9, "end_hour": 17 }}
-            }}
-        ],
-        "sitelinks": [
-            {{
-                "text": "Sitelink text",
-                "final_url": "{{website_url}}",
-                "description_1": "First description line",
-                "description_2": "Second description line"
             }}
         ]
     }}
@@ -347,12 +338,11 @@ Generate 10-20 highly relevant keywords:
         except Exception as e:
             print(f"Error scoring keyword: {str(e)}")
             return 0  # Return default score on error
-    def get_dataforseo_keywords(self,business,campaign,checkWebsite,keywords): 
+    def get_dataforseo_keywords(self,business,campaign,checkWebsite,keywords,website): 
         try:
             client = RestClient("admin@insightlytic.com", "258c3414aa949a09")
 
             if checkWebsite:
-                website = business.get("websiteUrl", "").strip()
                 if not website:
                     return []
                 

@@ -158,8 +158,11 @@ Objectives: {objectives}
                     }
                     
                     result = mongo.db.AdGroup.insert_one(ad_group_document)
-                    stored_ad_groups.append(
-                        str(result.inserted_id),
+                    stored_ad_groups.append({
+                        "id":str(result.inserted_id),
+                        "name": ad_group['name'],
+
+                    }
                     )
 
                 return {

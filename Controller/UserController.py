@@ -104,8 +104,7 @@ class UserController:
 
             redirect_url = f'{frontendUrl}/dashboard/google-ads-callback?customerIds={customer_ids_param}'
             print('redirect_url:', redirect_url)
-            return redirect(redirect_url)
-
+            return jsonify({'redirect_url': redirect_url}), 200
             
         except Exception as e:
             return jsonify({'error': str(e)}), 500

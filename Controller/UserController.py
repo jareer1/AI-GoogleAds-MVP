@@ -79,7 +79,7 @@ class UserController:
                 
             # Redirect to Google OAuth consent screen
             print('redicted_url:', redirect_url)
-            return redirect(redirect_url)
+            return jsonify({'redirect_url': redirect_url}), 200
             
         except ValidationError as e:
             return jsonify({'error': e.messages}), 400
@@ -104,7 +104,7 @@ class UserController:
 
             redirect_url = f'{frontendUrl}/dashboard/google-ads-callback?customerIds={customer_ids_param}'
             print('redirect_url:', redirect_url)
-            return jsonify({'redirect_url': redirect_url}),200
+            return redirect(redirect_url)
             
         except Exception as e:
             return jsonify({'error': str(e)}), 500

@@ -3,6 +3,9 @@ from marshmallow import ValidationError
 from ..Models.Request.User.UserCreateReqVM import UserSignupReqVM
 from ..Services.UserService import UserService
 from ..config import frontendUrl
+import json
+from urllib.parse import quote
+
 class UserController:
     def __init__(self, user_service: UserService):
         self.userBluePrint = Blueprint('user', __name__)
@@ -14,7 +17,7 @@ class UserController:
         self.userBluePrint.route('/oauth2callback')(self.oauth2callback)
         self.userBluePrint.route('/signup',methods=['POST'])(self.signup)
         self.userBluePrint.route('/login', methods=['POST'])(self.login)
-        self.userBluePrint.route('/customerIds/<userId>', methods=['GET'])(self.getCustomerIds)  # Reusing signup for user creation
+        self.userBluePrint.route('/customerIds/<userId>', methods=['GET'])(self.getCustomerDetails)  # Reusing signup for user creation
     def signup(self):
         try:
             data = request.get_json()
@@ -100,18 +103,19 @@ class UserController:
             if not success:
                 return jsonify({'error': result}), 400
             customers = self.userService.get_customer_ids(email)
-            customer_ids_param = ','.join(customers)
+            customers_json = json.dumps(customers)
+            customers_param = quote(customers_json)
 
-            redirect_url = f'{frontendUrl}/dashboard/google-ads-callback?customerIds={customer_ids_param}'
+            redirect_url = f'{frontendUrl}/dashboard/google-ads-callback?customerIds={customers_param}'
             print('redirect_url:', redirect_url)
             return redirect(redirect_url)
             
         except Exception as e:
             return jsonify({'error': str(e)}), 500
-    def getCustomerIds(self, userId):
+    def getCustomerDetails(self, userId):
         try:
             # Get customer IDs for the user
-            customer_ids = self.userService.getCustomerIdsFromDB(userId)
+            customer_ids = self.userService.getCustomerDetails(userId)
             if not customer_ids:
                 return jsonify({'message': 'No customer IDs found'}), 404
             

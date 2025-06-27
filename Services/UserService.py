@@ -170,49 +170,13 @@ class UserService:
             
         except Exception as e:
             return str(e), False, None
-    
-    # def get_customer_names(self, client, customer_ids: list[str]) -> list[dict]:
-    #     """Get customer names using Google Ads Query"""
-    #     try:
-    #         ga_service = client.get_service("GoogleAdsService")
-    #         customers = []
-
-    #         for customer_id in customer_ids:
-    #             # Create query to get customer details
-    #             query = """
-    #                 SELECT 
-    #                     customer.id,
-    #                     customer.descriptive_name
-    #                 FROM customer
-    #                 WHERE customer.id = '%s'
-    #             """ % customer_id
-
-    #             # Execute the search request
-    #             response = ga_service.search(
-    #                 customer_id=customer_id,
-    #                 query=query
-    #             )
-
-    #             # Process the response
-    #             for row in response:
-    #                 customers.append({
-    #                     'id': str(row.customer.id),
-    #                     'name': row.customer.descriptive_name
-    #                 })
-
-    #         return customers
-
-    #     except Exception as e:
-    #         print(f"Error getting customer names: {str(e)}")
-    #         raise
-    def get_customer_ids(self, email: str) -> list[str]:
+    def get_customer_ids(self, email: str) -> list[dict]:
         try:
-            # 1. Get user and verify refresh token
             user = mongo.db.Users.find_one({'email': email})
             if not user or 'refresh_token' not in user:
                 raise Exception("User not authenticated")
             print('user:', user)
-            # 2. Load OAuth client config from file
+
             flow = Flow.from_client_secrets_file(
                 self.client_secrets_file,
                 scopes=self.scopes
@@ -250,19 +214,42 @@ class UserService:
             response = customer_service.list_accessible_customers()
             customer_ids = [resource_name.split('/')[1] for resource_name in response.resource_names]
             print("Customer IDs:", customer_ids)
+
+            # 6. Get customer names for each customerId
+            googleads_service = client.get_service("GoogleAdsService")
+            customers = []
+            for customer_id in customer_ids:
+                print('testing customerId:', customer_id)
+                query = """
+                    SELECT 
+                        customer.id,
+                        customer.descriptive_name
+                    FROM customer
+                    WHERE customer.id = '%s'
+                """ % customer_id
+
+                response = googleads_service.search(
+                    customer_id=customer_id,
+                    query=query
+                )
+
+                for row in response:
+                    customers.append({
+                        'customerId': str(row.customer.id),
+                        'customerName': row.customer.descriptive_name
+                    })
+
+            # Save just the IDs in the DB for backward compatibility
             mongo.db.Users.update_one(
                 {'email': email},
                 {
                     '$set': {
-                        'customerIds': customer_ids,
+                        'customerIds': [c['customerId'] for c in customers],
+                        'customerNames': [c['customerName'] for c in customers],
                     }
                 }
             )
-            # customers = self.get_customer_names(client, customer_ids)
-            
-                
-            return customer_ids
-            
+            return customers
 
         except Exception as e:
             print(f"Error in get_customer_ids: {str(e)}")
@@ -281,12 +268,17 @@ class UserService:
         # jwt.encode returns a str in PyJWT>=2.x
         token = jwt.encode(payload, private_key_pem, algorithm='RS256')
         return token
-    def getCustomerIdsFromDB(self,userId):
+    def getCustomerDetails(self, userId):
         try:
             user = mongo.db.Users.find_one({'_id': ObjectId(userId)})
-            if not user or 'customerIds' not in user:
+            if not user or 'customerIds' not in user or 'customerNames' not in user:
                 return []
-            return user['customerIds']
+            # Zip customerIds and customerNames into a list of dicts
+            customers = [
+                {'customerId': cid, 'customerName': cname}
+                for cid, cname in zip(user['customerIds'], user['customerNames'])
+            ]
+            return customers
         except Exception as e:
             print(f"Error fetching customer IDs from DB: {str(e)}")
             return []
